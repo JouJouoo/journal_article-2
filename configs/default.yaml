@@ -1,0 +1,67 @@
+scenario:
+  num_agents: 8
+  num_nodes: 5
+  horizon: 24
+  delta_t: 1.0
+  seed: 7
+
+network:
+  voltage_ref: 1.0
+  voltage_min: 0.95
+  voltage_max: 1.05
+  default_resistance: 0.003
+  default_reactance: 0.0
+  default_line_capacity: 10.0
+
+market:
+  p2p_price_min: 0.2
+  p2p_price_max: 1.2
+  max_buy_power: 3.0
+  max_sell_power: 3.0
+  grid_buy_base: 0.82
+  grid_sell_base: 0.35
+  carbon_allowance_price: 0.06
+  low_carbon_sell_price: 0.03
+  grid_emission_base: 0.58
+  pv_credit_beta: 1.0
+
+storage:
+  capacity: 5.0
+  soc_min: 0.5
+  soc_max: 4.5
+  init_soc: 2.5
+  charge_efficiency: 0.95
+  discharge_efficiency: 0.95
+  max_charge_power: 1.5
+  max_discharge_power: 1.5
+  op_cost: 0.01
+
+lccoins:
+  alpha_q: 1.0
+  alpha_offset: 0.5
+  kappa: 0.2
+  q_norm: 5.0
+  offset_norm: 3.0
+
+clearing:
+  max_repair_iters: 20
+  repair_shrink: 0.9
+  network_tolerance: 0.0001
+  violation_penalty: 20.0
+
+rl:
+  hidden_dim: 64
+  recurrent_dim: 64
+  actor_lr: 0.0003
+  critic_lr: 0.001
+  gamma: 0.98
+  gae_lambda: 0.95
+  clip_eps: 0.2
+  entropy_coef: 0.01
+  value_coef: 0.5
+  max_grad_norm: 0.5
+  update_epochs: 3
+  batch_size: 128
+  episodes: 20
+  seed: 7
+  device: cpu
