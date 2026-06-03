@@ -10,8 +10,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-
-OKABE_ITO = ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00"]
+from figure_style import OKABE_ITO, apply_publication_style, save_publication_figure, style_axes
 
 
 def _load_metric(path: Path, metric: str) -> tuple[np.ndarray, np.ndarray]:
@@ -101,22 +100,9 @@ def main() -> None:
 
     output_dir = Path(args.output_dir) if args.output_dir else run_dir / "figures"
     output_dir.mkdir(parents=True, exist_ok=True)
+    apply_publication_style()
 
-    plt.rcParams.update(
-        {
-            "font.family": "sans-serif",
-            "font.sans-serif": ["Arial", "DejaVu Sans", "SimHei"],
-            "font.size": 10,
-            "axes.labelsize": 11,
-            "axes.titlesize": 12,
-            "xtick.labelsize": 9,
-            "ytick.labelsize": 9,
-            "legend.fontsize": 9,
-            "axes.unicode_minus": False,
-        }
-    )
-
-    fig, ax = plt.subplots(figsize=(8.2, 4.8))
+    fig, ax = plt.subplots(figsize=(7.2, 4.2))
     for idx, (seed, curve) in enumerate(zip(seeds, smoothed)):
         ax.plot(
             episodes_ref,
@@ -134,29 +120,24 @@ def main() -> None:
         color="#999999",
         alpha=0.22,
         linewidth=0,
-        label="Mean ± std",
+        label="Mean +/- std",
     )
-    ax.set_title("TECSF training reward across three random seeds")
+    ax.set_title("TECSF training reward across random seeds")
     ax.set_xlabel("Episode")
     ax.set_ylabel("Mean episode reward")
-    ax.grid(axis="y", color="#D9D9D9", linewidth=0.7, alpha=0.8)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
+    style_axes(ax)
     ax.legend(frameon=False, ncol=3, loc="lower right")
     fig.tight_layout()
 
-    png_path = output_dir / f"{args.metric}_multiseed_curve.png"
-    pdf_path = output_dir / f"{args.metric}_multiseed_curve.pdf"
-    fig.savefig(png_path, dpi=220)
-    fig.savefig(pdf_path)
+    figure_paths = save_publication_figure(fig, output_dir / f"{args.metric}_multiseed_curve")
     plt.close(fig)
 
     summary = _summarize(seeds, values, args.tail)
     summary_path = output_dir / "multiseed_training_summary.json"
     summary_path.write_text(json.dumps(summary, ensure_ascii=True, indent=2), encoding="utf-8")
 
-    print(f"png={png_path}")
-    print(f"pdf={pdf_path}")
+    for path in figure_paths:
+        print(f"figure={path}")
     print(f"summary={summary_path}")
 
 

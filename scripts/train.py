@@ -14,6 +14,7 @@ def main() -> None:
     parser.add_argument("--variant", default="tecsf")
     parser.add_argument("--episodes", type=int, default=None)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--device", default=None, help="auto, cpu, cuda, or cuda:<index>")
     parser.add_argument("--output-dir", default="outputs/train")
     args = parser.parse_args()
     result = train(
@@ -22,6 +23,7 @@ def main() -> None:
         output_dir=args.output_dir,
         episodes=args.episodes,
         seed=args.seed,
+        device=args.device,
     )
     print(f"checkpoint={result.checkpoint_path}")
     print(f"metrics={result.metrics_path}")

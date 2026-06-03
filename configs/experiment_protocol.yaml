@@ -1,0 +1,51 @@
+calibration:
+  purpose: "Hyperparameter exploration only; do not report as final evidence."
+  seeds: [7, 42, 100]
+  eval_seed_start: 100000
+  lccoins:
+    kappa_values: [0.0, 0.1, 0.2, 0.5]
+    alpha_q_values: [0.5, 1.0, 1.5]
+    alpha_offset_values: [0.25, 0.5, 1.0]
+  clearing:
+    violation_penalty_values: [10.0, 20.0, 40.0]
+    repair_shrink_values: [0.7, 0.8, 0.9]
+
+validation:
+  purpose: "Model and hyperparameter selection after calibration."
+  seeds: [2026, 3407, 9001]
+  eval_seed_start: 200000
+  scenarios:
+    line_capacity_scales: [1.0, 0.7, 0.5]
+    trade_power_scales: [1.0, 1.3]
+    agent_counts: [8, 16]
+    node_counts: [5, 9]
+
+final_test:
+  purpose: "Locked final evidence; do not change hyperparameters after viewing."
+  seeds: [31415, 27182, 16180, 14142, 17320]
+  eval_seed_start: 300000
+  scenarios:
+    line_capacity_scales: [1.0, 0.7, 0.5]
+    trade_power_scales: [1.0, 1.3]
+    agent_counts: [8, 16, 32]
+    node_counts: [5, 9, 17]
+
+reporting_rules:
+  primary_metrics:
+    - eval_feasible_rate
+    - eval_settlement_success_rate
+    - eval_max_violation
+    - eval_mean_reward
+  secondary_metrics:
+    - eval_system_cost
+    - eval_grid_carbon_emission
+    - eval_net_carbon_allowance_need
+    - eval_lccoins
+    - total_seconds
+  feasibility_gate:
+    min_settlement_success_rate: 0.95
+    max_constraint_violation: 0.1
+  statistical_tests:
+    paired: true
+    correction: holm
+    alpha: 0.05

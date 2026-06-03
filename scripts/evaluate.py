@@ -14,9 +14,17 @@ def main() -> None:
     parser.add_argument("checkpoint")
     parser.add_argument("--config", default="configs/default.yaml")
     parser.add_argument("--episodes", type=int, default=3)
+    parser.add_argument("--device", default=None, help="auto, cpu, cuda, or cuda:<index>")
+    parser.add_argument("--seed-start", type=int, default=None)
     parser.add_argument("--output", default="outputs/evaluation.json")
     args = parser.parse_args()
-    result = evaluate_policy(args.checkpoint, config=args.config, episodes=args.episodes)
+    result = evaluate_policy(
+        args.checkpoint,
+        config=args.config,
+        episodes=args.episodes,
+        device=args.device,
+        seed_start=args.seed_start,
+    )
     write_json(args.output, result)
     print(f"evaluation={args.output}")
 

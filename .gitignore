@@ -1,5 +1,7 @@
 __pycache__/
 .pytest_cache/
+.vscode/
+.codex_resources_*.json
 *.pyc
 *.pyo
 *.pt

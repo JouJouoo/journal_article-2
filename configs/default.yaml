@@ -4,6 +4,11 @@ scenario:
   horizon: 24
   delta_t: 1.0
   seed: 7
+  profile_path: ""
+  load_scale: 1.0
+  pv_scale: 1.0
+  load_noise_scale: 1.0
+  pv_noise_scale: 1.0
 
 network:
   voltage_ref: 1.0
@@ -42,12 +47,34 @@ lccoins:
   kappa: 0.2
   q_norm: 5.0
   offset_norm: 3.0
+  reward_mode: adaptive
+  reward_clip: 0.5
+  kappa_min: 0.0
+  kappa_max: 0.5
+  adaptive_ema: 0.2
+  adaptive_violation_gain: 2.0
+  adaptive_rejection_gain: 1.0
 
 clearing:
+  enable_dynamic_action_bounds: true
+  local_trade_margin: 1.2
+  local_storage_margin: 1.0
+  action_saturation_penalty: 0.02
   max_repair_iters: 20
   repair_shrink: 0.9
   network_tolerance: 0.0001
   violation_penalty: 20.0
+  enable_safety_shield: true
+  safety_storage_fraction: 1.0
+  enable_emergency_balancing: true
+  max_emergency_iters: 20
+  emergency_balance_shrink: 0.7
+  load_shed_penalty: 5.0
+  pv_curtail_penalty: 0.5
+  lagrange_step_size: 0.05
+  preserve_lagrange_on_reset: false
+  adaptive_violation_penalty_gain: 0.5
+  violation_penalty_max_multiplier: 5.0
 
 rl:
   hidden_dim: 64

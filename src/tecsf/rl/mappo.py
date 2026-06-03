@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,7 @@ import torch
 from torch import nn
 
 from tecsf.config import ExperimentConfig, load_config
+from tecsf.device import resolve_device
 from tecsf.env import EnergyCarbonEnv
 from tecsf.metrics import summarize_episode, write_json
 from tecsf.rl.buffer import RolloutBuffer
@@ -55,6 +57,7 @@ def _collect_episode(
     actor: RecurrentGaussianActor,
     critic: CentralizedCritic,
     device: torch.device,
+    use_heuristic_policy: bool = False,
 ) -> RolloutBuffer:
     buffer = RolloutBuffer()
     obs, global_state, _ = env.reset()
@@ -65,9 +68,16 @@ def _collect_episode(
         state_t = torch.as_tensor(global_state, dtype=torch.float32, device=device).unsqueeze(0)
         with torch.no_grad():
             hidden_before = hidden.clone()
-            dist, next_hidden = actor(obs_t, hidden)
-            action_t = torch.clamp(dist.sample(), -1.0, 1.0)
-            log_prob_t = dist.log_prob(action_t).sum(dim=-1)
+            if use_heuristic_policy:
+                action_t = torch.as_tensor(
+                    env.deterministic_action(), dtype=torch.float32, device=device
+                )
+                next_hidden = hidden
+                log_prob_t = torch.zeros(env.num_agents, dtype=torch.float32, device=device)
+            else:
+                dist, next_hidden = actor(obs_t, hidden)
+                action_t = torch.clamp(dist.sample(), -1.0, 1.0)
+                log_prob_t = dist.log_prob(action_t).sum(dim=-1)
             value_t = critic(state_t).squeeze(0)
         result = env.step(action_t.cpu().numpy())
         buffer.add(
@@ -169,12 +179,16 @@ def train(
     output_dir: str | Path = "outputs/train",
     episodes: int | None = None,
     seed: int | None = None,
+    device: str | None = None,
 ) -> TrainingResult:
-    cfg = load_config(config) if isinstance(config, (str, Path)) else config
+    cfg = load_config(config) if isinstance(config, (str, Path)) else copy.deepcopy(config)
+    torch_device = resolve_device(device or cfg.rl.device)
+    cfg.rl.device = str(torch_device)
     variant_spec = get_variant(variant)
     run_seed = cfg.rl.seed if seed is None else seed
+    cfg.rl.seed = run_seed
     _set_seed(run_seed)
-    device = torch.device(cfg.rl.device)
+    device_obj = torch_device
     env = EnergyCarbonEnv(cfg, variant=variant_spec)
     actor = RecurrentGaussianActor(
         obs_dim=env.observation_dim,
@@ -182,8 +196,8 @@ def train(
         hidden_dim=cfg.rl.hidden_dim,
         recurrent_dim=cfg.rl.recurrent_dim,
         use_recurrence=variant_spec.use_recurrence,
-    ).to(device)
-    critic = CentralizedCritic(env.global_state_dim, cfg.rl.hidden_dim).to(device)
+    ).to(device_obj)
+    critic = CentralizedCritic(env.global_state_dim, cfg.rl.hidden_dim).to(device_obj)
     actor_opt = torch.optim.Adam(actor.parameters(), lr=cfg.rl.actor_lr)
     critic_opt = torch.optim.Adam(critic.parameters(), lr=cfg.rl.critic_lr)
     output = Path(output_dir)
@@ -192,9 +206,15 @@ def train(
     episode_count = cfg.rl.episodes if episodes is None else episodes
     episode_metrics: list[dict[str, float]] = []
     for episode in range(episode_count):
-        rollout = _collect_episode(env, actor, critic, device)
+        rollout = _collect_episode(
+            env,
+            actor,
+            critic,
+            device_obj,
+            use_heuristic_policy=not variant_spec.learning,
+        )
         update_metrics = (
-            _update_policy(cfg, actor, critic, actor_opt, critic_opt, rollout, device)
+            _update_policy(cfg, actor, critic, actor_opt, critic_opt, rollout, device_obj)
             if variant_spec.learning
             else {"actor_loss": 0.0, "critic_loss": 0.0, "entropy": 0.0}
         )
@@ -229,16 +249,20 @@ def evaluate_policy(
     checkpoint_path: str | Path,
     config: ExperimentConfig | str | Path = "configs/default.yaml",
     episodes: int = 3,
+    device: str | None = None,
+    seed_start: int | None = None,
 ) -> dict[str, Any]:
-    cfg = load_config(config) if isinstance(config, (str, Path)) else config
+    cfg = load_config(config) if isinstance(config, (str, Path)) else copy.deepcopy(config)
+    torch_device = resolve_device(device or cfg.rl.device)
+    cfg.rl.device = str(torch_device)
     checkpoint = torch.load(
         checkpoint_path,
-        map_location=cfg.rl.device,
+        map_location=torch_device,
         weights_only=True,
     )
     variant = checkpoint.get("variant", "tecsf")
     variant_spec = get_variant(variant)
-    device = torch.device(cfg.rl.device)
+    device_obj = torch_device
     env = EnergyCarbonEnv(cfg, variant=variant_spec)
     actor = RecurrentGaussianActor(
         obs_dim=env.observation_dim,
@@ -246,24 +270,29 @@ def evaluate_policy(
         hidden_dim=cfg.rl.hidden_dim,
         recurrent_dim=cfg.rl.recurrent_dim,
         use_recurrence=variant_spec.use_recurrence,
-    ).to(device)
+    ).to(device_obj)
     actor.load_state_dict(checkpoint["actor_state_dict"])
     actor.eval()
 
     summaries = []
+    first_seed = cfg.scenario.seed if seed_start is None else seed_start
     for ep in range(episodes):
-        obs, global_state, _ = env.reset(seed=cfg.scenario.seed + ep)
-        hidden = actor.initial_hidden(env.num_agents, device)
+        obs, global_state, _ = env.reset(seed=first_seed + ep)
+        hidden = actor.initial_hidden(env.num_agents, device_obj)
         infos: list[dict] = []
         rewards: list[np.ndarray] = []
         done = False
         while not done:
-            with torch.no_grad():
-                dist, hidden = actor(
-                    torch.as_tensor(obs, dtype=torch.float32, device=device), hidden
-                )
-                action = torch.clamp(dist.mean, -1.0, 1.0)
-            result = env.step(action.cpu().numpy())
+            if not variant_spec.learning:
+                action_np = env.deterministic_action()
+            else:
+                with torch.no_grad():
+                    dist, hidden = actor(
+                        torch.as_tensor(obs, dtype=torch.float32, device=device_obj), hidden
+                    )
+                    action = torch.clamp(dist.mean, -1.0, 1.0)
+                action_np = action.cpu().numpy()
+            result = env.step(action_np)
             infos.append(result.info)
             rewards.append(result.reward)
             obs = result.observation
@@ -273,5 +302,7 @@ def evaluate_policy(
     return {
         "variant": variant,
         "episodes": episodes,
+        "device": str(torch_device),
+        "seed_start": first_seed,
         "metrics": summaries,
     }

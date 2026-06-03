@@ -14,6 +14,11 @@ class ScenarioConfig:
     horizon: int = 24
     delta_t: float = 1.0
     seed: int = 7
+    profile_path: str = ""
+    load_scale: float = 1.0
+    pv_scale: float = 1.0
+    load_noise_scale: float = 1.0
+    pv_noise_scale: float = 1.0
 
 
 @dataclass
@@ -60,14 +65,36 @@ class LccoinsConfig:
     kappa: float = 0.2
     q_norm: float = 5.0
     offset_norm: float = 3.0
+    reward_mode: str = "adaptive"
+    reward_clip: float = 0.5
+    kappa_min: float = 0.0
+    kappa_max: float = 0.5
+    adaptive_ema: float = 0.2
+    adaptive_violation_gain: float = 2.0
+    adaptive_rejection_gain: float = 1.0
 
 
 @dataclass
 class ClearingConfig:
+    enable_dynamic_action_bounds: bool = True
+    local_trade_margin: float = 1.2
+    local_storage_margin: float = 1.0
+    action_saturation_penalty: float = 0.02
     max_repair_iters: int = 20
     repair_shrink: float = 0.9
     network_tolerance: float = 1e-4
     violation_penalty: float = 20.0
+    enable_safety_shield: bool = True
+    safety_storage_fraction: float = 1.0
+    enable_emergency_balancing: bool = True
+    max_emergency_iters: int = 20
+    emergency_balance_shrink: float = 0.7
+    load_shed_penalty: float = 5.0
+    pv_curtail_penalty: float = 0.5
+    lagrange_step_size: float = 0.05
+    preserve_lagrange_on_reset: bool = False
+    adaptive_violation_penalty_gain: float = 0.5
+    violation_penalty_max_multiplier: float = 5.0
 
 
 @dataclass

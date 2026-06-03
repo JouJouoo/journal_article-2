@@ -11,6 +11,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from tecsf.config import load_config
+from tecsf.device import resolve_device
 from tecsf.env import EnergyCarbonEnv
 from tecsf.metrics import write_json
 from tecsf.rl.networks import RecurrentGaussianActor
@@ -41,6 +42,7 @@ def main() -> None:
     parser.add_argument("--config", default="configs/default.yaml")
     parser.add_argument("--episodes", type=int, default=1)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--device", default=None, help="auto, cpu, cuda, or cuda:<index>")
     parser.add_argument("--output-dir", default="outputs/ledger_export")
     parser.add_argument(
         "--fallback-policy",
@@ -53,7 +55,7 @@ def main() -> None:
     cfg = load_config(args.config)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    device = torch.device(cfg.rl.device)
+    device = resolve_device(args.device or cfg.rl.device)
     base_seed = cfg.scenario.seed if args.seed is None else args.seed
 
     summaries = []

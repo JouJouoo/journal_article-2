@@ -14,14 +14,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 import numpy as np
 
-
-STATE_COLORS = {
-    "Settled": "#009E73",
-    "Verified": "#56B4E9",
-    "Pending": "#F0E442",
-    "Rejected": "#D55E00",
-    "Reverted": "#CC79A7",
-}
+from figure_style import STATE_COLORS, apply_publication_style, save_publication_figure
 
 
 def _short_hash(value: str, length: int = 10) -> str:
@@ -72,7 +65,7 @@ def _plot_chain_overview(rows: list[dict], output: Path) -> None:
         ax.text(0.5, 0.5, "No blocks in ledger", ha="center", va="center")
         ax.axis("off")
         fig.tight_layout()
-        fig.savefig(output, dpi=180)
+        save_publication_figure(fig, output)
         plt.close(fig)
         return
 
@@ -177,19 +170,19 @@ def _plot_chain_overview(rows: list[dict], output: Path) -> None:
     ax_state.legend(handles=legend_handles, frameon=False, ncol=5, loc="upper center", bbox_to_anchor=(0.5, 1.35))
 
     ax_lc = fig.add_subplot(gs[2, 0])
-    ax_lc.set_title("C. Lccoins mint per block and cumulative total", loc="left", fontweight="bold")
+    ax_lc.set_title("C. LCCoins mint per block and cumulative total", loc="left", fontweight="bold")
     ax_lc.bar(heights, lccoins, color="#0072B2", alpha=0.78, label="Minted per block")
     ax_lc.set_xlabel("Block height")
-    ax_lc.set_ylabel("Lccoins minted")
+    ax_lc.set_ylabel("LCCoins minted")
     ax2 = ax_lc.twinx()
     ax2.plot(heights, cumulative_lccoins, color="#D55E00", linewidth=2, label="Cumulative")
-    ax2.set_ylabel("Cumulative Lccoins")
+    ax2.set_ylabel("Cumulative LCCoins")
     lines, labels = ax_lc.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax_lc.legend(lines + lines2, labels + labels2, frameon=False, loc="upper left")
 
     fig.subplots_adjust(left=0.08, right=0.92, top=0.93, bottom=0.08, hspace=0.58)
-    fig.savefig(output, dpi=180)
+    save_publication_figure(fig, output)
     plt.close(fig)
 
 
@@ -204,7 +197,7 @@ def _plot_balances(ledger: dict, output: Path) -> None:
     datasets = [
         ("A. Final energy balances", energy, "#4C78A8", "Energy balance"),
         ("B. Final carbon balances", carbon, "#59A14F", "Carbon balance"),
-        ("C. Final Lccoins balances", lccoins, "#F28E2B", "Lccoins"),
+        ("C. Final LCCoins balances", lccoins, "#F28E2B", "LCCoins"),
     ]
     for ax, (title, values, color, ylabel) in zip(axes, datasets):
         ax.set_title(title, loc="left", fontweight="bold")
@@ -215,7 +208,7 @@ def _plot_balances(ledger: dict, output: Path) -> None:
     axes[-1].set_xlabel("Agent")
     axes[-1].set_xticks(agents, [f"A{i}" for i in agents])
     fig.tight_layout()
-    fig.savefig(output, dpi=180)
+    save_publication_figure(fig, output)
     plt.close(fig)
 
 
@@ -235,7 +228,7 @@ def _plot_receipt_metrics(rows: list[dict], output: Path) -> None:
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     fig.tight_layout()
-    fig.savefig(output, dpi=180)
+    save_publication_figure(fig, output)
     plt.close(fig)
 
 
@@ -288,7 +281,7 @@ def _write_html_report(
   <div class="summary">
     <div class="card"><div>Blocks</div><div class="value">{len(rows)}</div></div>
     <div class="card"><div>Settled receipts</div><div class="value">{settled}/{len(rows)}</div></div>
-    <div class="card"><div>Total Lccoins</div><div class="value">{total_lccoins:.4f}</div></div>
+    <div class="card"><div>Total LCCoins</div><div class="value">{total_lccoins:.4f}</div></div>
     <div class="card"><div>Head hash</div><div class="value"><code>{_short_hash(head_hash, 12)}</code></div></div>
   </div>
   <h2>Blockchain linkage and settlement effects</h2>
@@ -302,7 +295,7 @@ def _write_html_report(
     <thead>
       <tr>
         <th>Height</th><th>State</th><th>Block hash</th><th>Prev hash</th>
-        <th>Tx</th><th>Lccoins</th><th>Energy entries</th><th>Carbon entries</th>
+        <th>Tx</th><th>LCCoins</th><th>Energy entries</th><th>Carbon entries</th>
       </tr>
     </thead>
     <tbody>
@@ -322,6 +315,7 @@ def main() -> None:
     parser.add_argument("ledger", help="Path to ledger_ep*.json exported by scripts/export_ledger.py.")
     parser.add_argument("--output-dir", default=None)
     args = parser.parse_args()
+    apply_publication_style()
 
     ledger_path = Path(args.ledger)
     output_dir = Path(args.output_dir) if args.output_dir else ledger_path.parent / "visuals"
