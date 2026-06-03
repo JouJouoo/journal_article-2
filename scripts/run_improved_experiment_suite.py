@@ -309,6 +309,8 @@ def _prepare_benchmark_configs(args: argparse.Namespace, root: Path) -> dict[str
             day_type=args.benchmark_day_type,
             case=case,
             pv_penetration=args.benchmark_pv_penetration,
+            standard_source=args.benchmark_standard_source,
+            case69_m=args.case69_m,
         )
         np.savez(profile_path, **profile)
         cfg = dict(base_config)
@@ -343,6 +345,21 @@ def main() -> None:
         choices=["ieee33bw", "ieee69"],
         default=[],
         help="Also run formal benchmark-case suites with generated standard profile configs.",
+    )
+    parser.add_argument(
+        "--benchmark-standard-source",
+        choices=["locked", "authoritative", "auto"],
+        default="locked",
+        help=(
+            "Source mode used while generating IEEE benchmark profiles. Paper-grade "
+            "source checks can use --benchmark-standard-source authoritative with "
+            "--case69-m after installing optional benchmark-source dependencies."
+        ),
+    )
+    parser.add_argument(
+        "--case69-m",
+        default=None,
+        help="Path to MATPOWER case69.m for authoritative IEEE 69-bus profile generation.",
     )
     parser.add_argument(
         "--benchmark-only",

@@ -9,6 +9,12 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from tecsf.benchmark_cases import BENCHMARK_CASES, BenchmarkCase, get_benchmark_case
+from tecsf.benchmark_sources import (
+    BenchmarkSourceUnavailable,
+    compare_benchmark_cases,
+    failed_checks,
+    load_authoritative_benchmark_case,
+)
 
 
 SYNTHETIC33_BRANCHES = np.asarray(
@@ -88,6 +94,47 @@ def _model_resistance(case: BenchmarkCase) -> tuple[np.ndarray, np.ndarray]:
     )
 
 
+def _resolve_standard_case(
+    case_name: str,
+    standard_source: str,
+    case69_m: str | Path | None,
+) -> tuple[BenchmarkCase, str, str]:
+    locked = get_benchmark_case(case_name)
+    if standard_source == "locked":
+        return (
+            locked,
+            "locked_standard_profile",
+            "Locked TECSF benchmark table; validate against authoritative sources with "
+            "scripts/validate_benchmark_sources.py before paper-grade runs.",
+        )
+
+    try:
+        source_case = load_authoritative_benchmark_case(case_name, case69_m=case69_m)
+    except BenchmarkSourceUnavailable as exc:
+        if standard_source == "auto":
+            return (
+                locked,
+                "locked_after_authoritative_unavailable",
+                f"Authoritative source unavailable locally: {exc}",
+            )
+        raise
+
+    checks = compare_benchmark_cases(locked, source_case)
+    problems = failed_checks(checks)
+    if problems:
+        detail = "; ".join(
+            f"{check.name} expected {check.expected} observed {check.observed}"
+            for check in problems[:3]
+        )
+        raise ValueError(f"{case_name} authoritative source does not match locked table: {detail}")
+    return (
+        source_case,
+        "authoritative_source_validated",
+        "Authoritative pandapower/MATPOWER source loaded locally and matched the locked "
+        "benchmark topology, load, and impedance tables.",
+    )
+
+
 def build_standard_profile(
     case_name: str,
     agents: int | None,
@@ -95,8 +142,12 @@ def build_standard_profile(
     seed: int,
     day_type: str,
     pv_penetration: float,
+    standard_source: str = "locked",
+    case69_m: str | Path | None = None,
 ) -> dict[str, np.ndarray]:
-    case = get_benchmark_case(case_name)
+    case, source_mode, source_validation = _resolve_standard_case(
+        case_name, standard_source, case69_m
+    )
     rng = np.random.default_rng(seed)
     load_shape, pv_shape, price_shape = _time_series_shapes(horizon, day_type)
     load_nodes = np.arange(1, case.num_buses, dtype=np.int64)
@@ -145,6 +196,13 @@ def build_standard_profile(
         "case_source": np.asarray(case.source),
         "case_source_url": np.asarray(case.source_url),
         "case_notes": np.asarray(case.notes),
+        "benchmark_source_mode": np.asarray(source_mode),
+        "benchmark_source_validation": np.asarray(source_validation),
+        "benchmark_source_policy": np.asarray(
+            "Hybrid source workflow: standard IEEE data are loaded or validated from "
+            "pandapower/MATPOWER when available, then frozen into NPZ profiles for "
+            "reproducible RL training and evaluation."
+        ),
         "model_parameter_notes": np.asarray(
             "Raw branch ohm values are preserved; resistance/reactance fields are "
             "scaled equivalents for TECSF's linear radial voltage approximation."
@@ -222,10 +280,21 @@ def build_profile(
     day_type: str,
     case: str = "synthetic33",
     pv_penetration: float = 0.5,
+    standard_source: str = "locked",
+    case69_m: str | Path | None = None,
 ) -> dict[str, np.ndarray]:
     if case == "synthetic33":
         return build_synthetic33_profile(agents, horizon, seed, day_type)
-    return build_standard_profile(case, agents, horizon, seed, day_type, pv_penetration)
+    return build_standard_profile(
+        case,
+        agents,
+        horizon,
+        seed,
+        day_type,
+        pv_penetration,
+        standard_source=standard_source,
+        case69_m=case69_m,
+    )
 
 
 def main() -> None:
@@ -239,6 +308,21 @@ def main() -> None:
     parser.add_argument("--horizon", type=int, default=24)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--pv-penetration", type=float, default=0.5)
+    parser.add_argument(
+        "--standard-source",
+        choices=["locked", "authoritative", "auto"],
+        default="locked",
+        help=(
+            "Source mode for IEEE benchmark cases: locked uses frozen project tables; "
+            "authoritative loads pandapower/MATPOWER sources and requires local inputs; "
+            "auto tries authoritative first and falls back to locked tables."
+        ),
+    )
+    parser.add_argument(
+        "--case69-m",
+        default=None,
+        help="Path to MATPOWER case69.m when --case ieee69 uses authoritative/auto source mode.",
+    )
     parser.add_argument(
         "--day-type",
         choices=["weekday", "weekend", "cloudy"],
@@ -255,6 +339,8 @@ def main() -> None:
         day_type=args.day_type,
         case=args.case,
         pv_penetration=args.pv_penetration,
+        standard_source=args.standard_source,
+        case69_m=args.case69_m,
     )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -271,6 +357,7 @@ def main() -> None:
             f"{float(profile['benchmark_total_p_mw']):.4f} MW/"
             f"{float(profile['benchmark_total_q_mvar']):.4f} MVAr"
         )
+        print(f"source_mode={str(np.asarray(profile['benchmark_source_mode']).item())}")
 
 
 if __name__ == "__main__":

@@ -99,12 +99,34 @@ External load/PV/network profiles can be supplied through
 factor arrays.
 
 Generate benchmark profiles for external-validity runs. `ieee33bw` and
-`ieee69` use vendored standard network/load tables; `synthetic33` is a derived
+`ieee69` now follow a hybrid source workflow: pandapower/MATPOWER are treated
+as the authoritative standard-case sources, while TECSF training and evaluation
+use frozen `.npz` profiles for reproducibility. `synthetic33` is a derived
 IEEE-33-style synthetic profile and must not be reported as a standard case:
 
 ```powershell
 & "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\create_benchmark_profile.py --case ieee33bw --output outputs\profiles\ieee33bw_weekday.npz --day-type weekday
 & "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\create_benchmark_profile.py --case ieee69 --output outputs\profiles\ieee69_weekday.npz --day-type weekday
+```
+
+Before paper-grade benchmark runs, validate the locked source tables against
+local authoritative sources. IEEE 33-bus validation requires the optional
+`benchmark-sources` extra for `pandapower`; IEEE 69-bus validation requires a
+local MATPOWER `case69.m`:
+
+```powershell
+& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" -m pip install ".[benchmark-sources]"
+& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\validate_benchmark_sources.py --case69-m data\case69.m --strict
+```
+
+To generate profiles directly from locally available authoritative sources, use
+`--standard-source authoritative`; `--standard-source auto` attempts the
+authoritative path and falls back to the locked tables when local dependencies
+or `case69.m` are unavailable:
+
+```powershell
+& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\create_benchmark_profile.py --case ieee33bw --standard-source authoritative --output outputs\profiles\ieee33bw_weekday.npz
+& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\create_benchmark_profile.py --case ieee69 --standard-source authoritative --case69-m data\case69.m --output outputs\profiles\ieee69_weekday.npz
 ```
 
 Export a simulated TECS-Chain ledger from a trained checkpoint:

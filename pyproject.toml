@@ -15,6 +15,11 @@ dependencies = [
     "torch",
 ]
 
+[project.optional-dependencies]
+benchmark-sources = [
+    "pandapower",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

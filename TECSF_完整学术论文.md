@@ -176,7 +176,7 @@ $$
 
 实验使用当前项目代码完整重跑，并统一采用 `--episodes 1000 --eval-episodes 20 --seeds 7 42 100 2026 3407 --device cpu --jobs 40` 的正式训练配置。为避免多进程训练中的线程过度竞争，重跑时将 `OMP_NUM_THREADS`、`MKL_NUM_THREADS`、`OPENBLAS_NUM_THREADS`、`NUMEXPR_NUM_THREADS` 和 `TORCH_NUM_THREADS` 均设为 1。正式结果输出目录为 `outputs/report_experiments_20260601_fixed/`，历史输出目录仅作为留存记录，不再用于本文结果表格和图路径。默认场景包含 8 个产消者、5 个配电节点、24 个时段、1 h 时间分辨率、用户侧储能和日内变化的负荷、光伏、电价与电网排放因子。储能容量为 5.0，SOC 边界为 0.5 至 4.5，最大充放电功率均为 1.5；P2P 报价范围为 0.2 至 1.2，电网基准购电价为 0.82，售电价为 0.35，碳配额购买价格为 0.06，剩余低碳贡献售卖价格为 0.03。LCCoins 默认参数为 $\alpha_q=1.0$、$\alpha_o=0.5$、$\kappa=0.2$，奖励模式为自适应。
 
-表 1 汇总了实验覆盖范围。主对比与消融实验覆盖 TECSF、MAPPO、constrained MAPPO、heuristic、greedy feasible、myopic optimal、no_chain、no_lccoins、no_feedback、no_lagrange、preset_low_carbon 和 safety_only。LCCoins 敏感性实验扫描 $\kappa\in\{0,0.1,0.2,0.5\}$。网络压力实验通过线路容量缩放和交易功率上限缩放构造紧约束场景。系统压力实验组合负荷、光伏、电价、碳价和线路容量扰动。可扩展性实验比较 8/16/32 个产消者和 5/9/17 个节点下的运行表现。结算压力实验注入正常结算、哈希篡改、约束越限、执行失败、重复铸造和审计一致性 case。外部有效性实验使用 `ieee33bw` 和 `ieee69` 两套标准配电网 profile，其中 IEEE 33-bus 为 33 个节点和 32 条径向支路，总负荷为 3.7150 MW / 2.3000 MVAr；IEEE 69-bus 为 69 个节点和 68 条径向支路，总负荷为 3.8019 MW / 2.6941 MVAr。
+表 1 汇总了实验覆盖范围。主对比与消融实验覆盖 TECSF、MAPPO、constrained MAPPO、heuristic、greedy feasible、myopic optimal、no_chain、no_lccoins、no_feedback、no_lagrange、preset_low_carbon 和 safety_only。LCCoins 敏感性实验扫描 $\kappa\in\{0,0.1,0.2,0.5\}$。网络压力实验通过线路容量缩放和交易功率上限缩放构造紧约束场景。系统压力实验组合负荷、光伏、电价、碳价和线路容量扰动。可扩展性实验比较 8/16/32 个产消者和 5/9/17 个节点下的运行表现。结算压力实验注入正常结算、哈希篡改、约束越限、执行失败、重复铸造和审计一致性 case。外部有效性实验使用 `ieee33bw` 和 `ieee69` 两套标准配电网 profile，其中 IEEE 33-bus 为 33 个节点和 32 条径向支路，总负荷为 3.7150 MW / 2.3000 MVAr；IEEE 69-bus 为 69 个节点和 68 条径向支路，总负荷为 3.8021 MW / 2.6947 MVAr。
 
 **表 1.** 实验覆盖范围与训练规模。
 
@@ -313,14 +313,14 @@ LCCoins 敏感性实验表明，修复后的管线在 $\kappa\in\{0,0.1,0.2,0.5\
 
 ### 5.6 IEEE 33/69 标准配电网算例
 
-为避免将风格化拓扑误称为标准算例，本文仅将新生成的 `ieee33bw` 和 `ieee69` profile 用作 IEEE 33-bus 与 IEEE 69-bus 标准配电网结果；此前的 `synthetic33` 仅作为 IEEE-33-style synthetic profile，不用于替代标准算例结论。两套标准算例均采用 12.66 kV 基准电压，线路拓扑和负荷基准来自内置参数表，PV、价格和碳因子仍由本文能源-碳交易场景叠加生成。
+为避免将风格化拓扑误称为标准算例，本文仅将新生成的 `ieee33bw` 和 `ieee69` profile 用作 IEEE 33-bus 与 IEEE 69-bus 标准配电网结果；此前的 `synthetic33` 仅作为 IEEE-33-style synthetic profile，不用于替代标准算例结论。两套标准算例均采用 12.66 kV 基准电压，线路拓扑、负荷基准与阻抗参数以 pandapower/MATPOWER 标准算例为权威来源，并在实验中锁定为 `.npz` profile 以保证强化学习训练和评估可复现；PV、价格和碳因子仍由本文能源-碳交易场景叠加生成。
 
 **表 8.** IEEE 标准配电网算例元数据。
 
 | 标准算例 | bus / branch | 总负荷 P/Q | 来源口径 |
 | --- | --- | --- | --- |
 | IEEE 33-bus (`ieee33bw`) | 33 / 32 | 3.7150 MW / 2.3000 MVAr | MATPOWER/pandapower case33bw 与 Baran-Wu 口径 |
-| IEEE 69-bus (`ieee69`) | 69 / 68 | 3.8019 MW / 2.6941 MVAr | 公开 69-bus radial distribution benchmark 数据表 |
+| IEEE 69-bus (`ieee69`) | 69 / 68 | 3.8021 MW / 2.6947 MVAr | MATPOWER case69 / 公开 69-bus radial distribution benchmark 数据表 |
 
 IEEE 33-bus 结果显示，修复后 TECSF 的系统成本为 14.14，购电碳排为 10.06，结算成功率为 1.000，最大约束违背为 0.000，已满足标准算例可行性门槛；其成本和碳排接近但仍略高于 myopic_opt 的 14.08 和 10.01。IEEE 69-bus 结果显示，TECSF 的结算成功率和最大违背同样为 1.000 和 0.000，系统成本为 26.30，购电碳排为 19.47，优于 heuristic 但不优于 myopic_opt。两套标准算例共同说明，TECSF 的可信结算和 LCCoins 反馈链路能够迁移到标准配电网 profile，但不能声称其在标准算例上支配确定性最优基线。
 
