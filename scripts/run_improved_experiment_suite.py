@@ -43,6 +43,84 @@ def _suite_commands(
     ]
     if args.benchmark_only:
         return _benchmark_commands(common, out, benchmark_configs)
+    if args.skip_ablations:
+        commands = [
+            [
+                PYTHON,
+                "scripts/run_multiseed_experiments.py",
+                *common,
+                "--variants",
+                "tecsf",
+                "constrained_mappo",
+                "safety_only",
+                "myopic_opt",
+                "heuristic",
+                "--output-dir",
+                str(out / "formal_multiseed"),
+            ],
+            [
+                PYTHON,
+                "scripts/run_network_stress.py",
+                *common,
+                "--variants",
+                "tecsf",
+                "myopic_opt",
+                "heuristic",
+                "--line-capacity-scales",
+                *(["0.5"] if args.quick else ["1.0", "0.7", "0.5"]),
+                "--trade-power-scales",
+                "1.0",
+                "1.3",
+                "--output-dir",
+                str(out / "network_stress"),
+            ],
+            [
+                PYTHON,
+                "scripts/run_system_stress.py",
+                *common,
+                "--variants",
+                "tecsf",
+                "myopic_opt",
+                "heuristic",
+                "--load-scales",
+                *(["1.3"] if args.quick else ["1.0", "1.3"]),
+                "--pv-scales",
+                *(["0.7"] if args.quick else ["0.7", "1.0", "1.3"]),
+                "--grid-price-scales",
+                *(["1.0"] if args.quick else ["1.0", "1.3"]),
+                "--carbon-price-scales",
+                *(["2.0"] if args.quick else ["1.0", "2.0"]),
+                "--line-capacity-scales",
+                *(["0.7"] if args.quick else ["1.0", "0.7"]),
+                "--output-dir",
+                str(out / "system_stress"),
+            ],
+            [
+                PYTHON,
+                "scripts/run_scalability_experiment.py",
+                *common,
+                "--variants",
+                "tecsf",
+                "myopic_opt",
+                "heuristic",
+                "--agent-counts",
+                *(["16"] if args.quick else ["8", "16", "32"]),
+                "--node-counts",
+                *(["9"] if args.quick else ["5", "9", "17"]),
+                "--output-dir",
+                str(out / "scalability"),
+            ],
+            [
+                PYTHON,
+                "scripts/run_settlement_stress.py",
+                "--seeds",
+                *[str(seed) for seed in args.seeds],
+                "--output-dir",
+                str(out / "settlement_stress"),
+            ],
+        ]
+        commands.extend(_benchmark_commands(common, out, benchmark_configs))
+        return commands
     if args.quick:
         commands = [
             [
@@ -65,7 +143,7 @@ def _suite_commands(
                 "--variants",
                 "tecsf",
                 "no_lccoins",
-                "--kappa-values",
+                "--asset-utility-weights",
                 "0.1",
                 "--output-dir",
                 str(out / "lccoins_sensitivity"),
@@ -146,7 +224,7 @@ def _suite_commands(
             PYTHON,
             "scripts/run_lccoins_sensitivity.py",
             *common,
-            "--kappa-values",
+            "--asset-utility-weights",
             "0",
             "0.1",
             "0.2",
@@ -248,19 +326,23 @@ def _post_commands(
     output_dir: Path,
     benchmark_cases: list[str] | None = None,
     benchmark_only: bool = False,
+    skip_ablations: bool = False,
 ) -> list[list[str]]:
     commands: list[list[str]] = []
     suites = []
     if not benchmark_only:
-        suites.extend(
-            [
-                "formal_multiseed",
-                "lccoins_sensitivity",
-                "network_stress",
-                "system_stress",
-                "scalability",
-            ]
-        )
+        if skip_ablations:
+            suites.extend(["formal_multiseed", "network_stress", "system_stress", "scalability"])
+        else:
+            suites.extend(
+                [
+                    "formal_multiseed",
+                    "lccoins_sensitivity",
+                    "network_stress",
+                    "system_stress",
+                    "scalability",
+                ]
+            )
     suites.extend(f"benchmark_{case}" for case in (benchmark_cases or []))
     for suite in suites:
         summary = output_dir / suite / "summary.json"
@@ -284,6 +366,7 @@ def _post_commands(
                 PYTHON,
                 "scripts/check_experiment_acceptance.py",
                 str(output_dir),
+                *(["--skip-ablations"] if skip_ablations else []),
             ]
         )
     return commands
@@ -366,6 +449,11 @@ def main() -> None:
         action="store_true",
         help="Run and post-process only the requested benchmark-case suites.",
     )
+    parser.add_argument(
+        "--skip-ablations",
+        action="store_true",
+        help="Skip component ablation and LCCoins sensitivity suites; keep main, stress, scalability, settlement, and benchmark suites.",
+    )
     parser.add_argument("--benchmark-day-type", choices=["weekday", "weekend", "cloudy"], default="weekday")
     parser.add_argument("--benchmark-pv-penetration", type=float, default=0.5)
     parser.add_argument("--skip-post", action="store_true")
@@ -379,6 +467,8 @@ def main() -> None:
         args.seeds = [7, 42] if args.quick else [7, 42, 100, 2026, 3407]
     if args.benchmark_only and not args.benchmark_cases:
         parser.error("--benchmark-only requires at least one --benchmark-cases value")
+    if args.benchmark_only and args.skip_ablations:
+        parser.error("--skip-ablations is not meaningful with --benchmark-only")
 
     root = Path(__file__).resolve().parents[1]
     output_dir = Path(args.output_dir)
@@ -386,7 +476,7 @@ def main() -> None:
     for command in _suite_commands(args, root, benchmark_configs):
         _run(command, root, args.dry_run)
     if not args.skip_post:
-        for command in _post_commands(output_dir, args.benchmark_cases, args.benchmark_only):
+        for command in _post_commands(output_dir, args.benchmark_cases, args.benchmark_only, args.skip_ablations):
             _run(command, root, args.dry_run)
 
 

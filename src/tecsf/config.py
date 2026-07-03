@@ -60,18 +60,16 @@ class StorageConfig:
 
 @dataclass
 class LccoinsConfig:
-    alpha_q: float = 1.0
-    alpha_offset: float = 0.5
-    kappa: float = 0.2
-    q_norm: float = 5.0
-    offset_norm: float = 3.0
-    reward_mode: str = "adaptive"
-    reward_clip: float = 0.5
-    kappa_min: float = 0.0
-    kappa_max: float = 0.5
-    adaptive_ema: float = 0.2
-    adaptive_violation_gain: float = 2.0
-    adaptive_rejection_gain: float = 1.0
+    clean_energy_weight: float = 1.0
+    carbon_reduction_weight: float = 1.0
+    minting_coefficient: float = 1.0
+    crra_rho: float = 0.5
+    crra_b0: float = 1.0
+    stock_utility_weight: float = 0.1
+    increment_utility_weight: float = 0.2
+    balance_norm: float = 10.0
+    validator_count: int = 4
+    consensus_threshold: int = 0
 
 
 @dataclass
@@ -106,6 +104,8 @@ class RLConfig:
     gamma: float = 0.98
     gae_lambda: float = 0.95
     clip_eps: float = 0.2
+    clip_eps_min: float = 0.1
+    clip_eps_max: float = 0.3
     entropy_coef: float = 0.01
     value_coef: float = 0.5
     max_grad_norm: float = 0.5

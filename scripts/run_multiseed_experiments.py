@@ -19,7 +19,6 @@ DEFAULT_VARIANTS = [
     "tecsf",
     "no_chain",
     "no_lccoins",
-    "no_feedback",
     "mappo",
     "constrained_mappo",
     "safety_only",

@@ -86,9 +86,6 @@ def summarize_episode(infos: list[dict], rewards: list[np.ndarray]) -> dict[str,
     total_storage_repair_deviation = 0.0
     total_safety_adjustment = 0.0
     total_repair_iterations = 0.0
-    total_lccoins_reward_raw = 0.0
-    total_lccoins_reward_clipped = 0.0
-    total_lccoins_reward_weight = 0.0
     total_clear_seconds = 0.0
     total_settlement_seconds = 0.0
     total_reward_seconds = 0.0
@@ -102,11 +99,18 @@ def summarize_episode(infos: list[dict], rewards: list[np.ndarray]) -> dict[str,
     max_violation = 0.0
     agent_profit = None
     agent_lccoins = None
+    agent_lccoins_balance = None
+    agent_reward_eco = None
+    agent_reward_coin = None
+    agent_utility_stock = None
+    agent_utility_increment = None
     agent_carbon = None
     agent_q_lc = None
     agent_c_offset = None
     agent_c_sell = None
     agent_lccoins_candidate = None
+    consensus_confirmed = 0.0
+    consensus_total = 0.0
     for info in infos:
         total_cost += float(info.get("system_cost", 0.0))
         total_social_cost += float(info.get("system_social_cost", info.get("system_cost", 0.0)))
@@ -136,13 +140,6 @@ def summarize_episode(infos: list[dict], rewards: list[np.ndarray]) -> dict[str,
         )
         total_safety_adjustment += float(info.get("safety_adjustment", 0.0))
         total_repair_iterations += float(info.get("repair_iterations", 0.0))
-        total_lccoins_reward_raw += float(info.get("lccoins_reward_raw", 0.0))
-        total_lccoins_reward_clipped += float(
-            info.get("lccoins_reward_clipped", 0.0)
-        )
-        total_lccoins_reward_weight += float(
-            info.get("lccoins_reward_weight", 0.0)
-        )
         total_clear_seconds += float(info.get("clear_seconds", 0.0))
         total_settlement_seconds += float(info.get("settlement_seconds", 0.0))
         total_reward_seconds += float(info.get("reward_seconds", 0.0))
@@ -159,6 +156,21 @@ def summarize_episode(infos: list[dict], rewards: list[np.ndarray]) -> dict[str,
             violation_totals[key] += float(info.get("violations", {}).get(key, 0.0))
         agent_profit = _accumulate_agent_vector(agent_profit, info, "agent_profit")
         agent_lccoins = _accumulate_agent_vector(agent_lccoins, info, "agent_lccoins")
+        agent_lccoins_balance = _accumulate_agent_vector(
+            agent_lccoins_balance, info, "agent_lccoins_balance"
+        )
+        agent_reward_eco = _accumulate_agent_vector(
+            agent_reward_eco, info, "agent_reward_eco"
+        )
+        agent_reward_coin = _accumulate_agent_vector(
+            agent_reward_coin, info, "agent_reward_coin"
+        )
+        agent_utility_stock = _accumulate_agent_vector(
+            agent_utility_stock, info, "agent_utility_stock"
+        )
+        agent_utility_increment = _accumulate_agent_vector(
+            agent_utility_increment, info, "agent_utility_increment"
+        )
         agent_carbon = _accumulate_agent_vector(agent_carbon, info, "agent_carbon_emission")
         agent_q_lc = _accumulate_agent_vector(agent_q_lc, info, "agent_q_lc")
         agent_c_offset = _accumulate_agent_vector(agent_c_offset, info, "agent_c_offset")
@@ -166,6 +178,10 @@ def summarize_episode(infos: list[dict], rewards: list[np.ndarray]) -> dict[str,
         agent_lccoins_candidate = _accumulate_agent_vector(
             agent_lccoins_candidate, info, "agent_lccoins_candidate"
         )
+        if "consensus_confirmed" in info:
+            confirmations = np.asarray(info["consensus_confirmed"], dtype=np.float64)
+            consensus_confirmed += float(confirmations.sum())
+            consensus_total += float(confirmations.size)
     renewable_consumption_rate = total_pv_used / max(total_pv_generation, 1e-12)
     repair_rate = total_repair_deviation / max(total_attempted_p2p, 1e-12)
     agent_profit_arr = (
@@ -177,6 +193,31 @@ def summarize_episode(infos: list[dict], rewards: list[np.ndarray]) -> dict[str,
         np.zeros_like(agent_profit_arr)
         if agent_lccoins is None
         else np.asarray(agent_lccoins, dtype=np.float64)
+    )
+    agent_lccoins_balance_arr = (
+        np.zeros_like(agent_profit_arr)
+        if agent_lccoins_balance is None
+        else np.asarray(agent_lccoins_balance, dtype=np.float64)
+    )
+    agent_reward_eco_arr = (
+        np.zeros_like(agent_profit_arr)
+        if agent_reward_eco is None
+        else np.asarray(agent_reward_eco, dtype=np.float64)
+    )
+    agent_reward_coin_arr = (
+        np.zeros_like(agent_profit_arr)
+        if agent_reward_coin is None
+        else np.asarray(agent_reward_coin, dtype=np.float64)
+    )
+    agent_utility_stock_arr = (
+        np.zeros_like(agent_profit_arr)
+        if agent_utility_stock is None
+        else np.asarray(agent_utility_stock, dtype=np.float64)
+    )
+    agent_utility_increment_arr = (
+        np.zeros_like(agent_profit_arr)
+        if agent_utility_increment is None
+        else np.asarray(agent_utility_increment, dtype=np.float64)
     )
     agent_carbon_arr = (
         np.zeros_like(agent_profit_arr)
@@ -242,9 +283,6 @@ def summarize_episode(infos: list[dict], rewards: list[np.ndarray]) -> dict[str,
         "constraint_rejection_records": float(constraint_rejections),
         "hash_rejection_records": float(hash_rejections),
         "execution_revert_records": float(execution_reverts),
-        "lccoins_reward_raw": total_lccoins_reward_raw,
-        "lccoins_reward_clipped": total_lccoins_reward_clipped,
-        "lccoins_reward_weight_mean": total_lccoins_reward_weight / max(len(infos), 1),
         "clear_seconds": total_clear_seconds,
         "settlement_seconds": total_settlement_seconds,
         "reward_seconds": total_reward_seconds,
@@ -257,8 +295,16 @@ def summarize_episode(infos: list[dict], rewards: list[np.ndarray]) -> dict[str,
         "agent_profit_std": float(agent_profit_arr.std()) if agent_profit_arr.size else 0.0,
         "agent_profit_gini": gini(agent_profit_arr),
         "agent_profit_jain": jain_index(agent_profit_arr),
+        "reward_eco": float(agent_reward_eco_arr.sum()),
+        "reward_coin": float(agent_reward_coin_arr.sum()),
+        "consensus_confirmed_rate": consensus_confirmed / max(consensus_total, 1.0),
         "agent_lccoins_gini": gini(agent_lccoins_arr),
         "agent_carbon_gini": gini(agent_carbon_arr),
+        "agent_lccoins_balance": agent_lccoins_balance_arr.astype(float).tolist(),
+        "agent_reward_eco": agent_reward_eco_arr.astype(float).tolist(),
+        "agent_reward_coin": agent_reward_coin_arr.astype(float).tolist(),
+        "agent_utility_stock": agent_utility_stock_arr.astype(float).tolist(),
+        "agent_utility_increment": agent_utility_increment_arr.astype(float).tolist(),
         "agent_q_lc": agent_q_lc_arr.astype(float).tolist(),
         "agent_c_offset": agent_c_offset_arr.astype(float).tolist(),
         "agent_c_sell": agent_c_sell_arr.astype(float).tolist(),

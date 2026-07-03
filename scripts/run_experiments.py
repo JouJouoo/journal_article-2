@@ -36,7 +36,6 @@ def main() -> None:
             "tecsf",
             "no_chain",
             "no_lccoins",
-            "no_feedback",
             "mappo",
             "no_lagrange",
             "preset_low_carbon",

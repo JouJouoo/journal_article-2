@@ -50,10 +50,11 @@ def _build_synthetic_report(root: Path) -> None:
     _write_summary(root, "formal_multiseed", formal)
 
     lccoins = []
-    for kappa in ["0", "0p1", "0p2"]:
-        for idx, variant in enumerate(["tecsf", "no_feedback", "no_lccoins", "preset_low_carbon"], start=1):
+    for asset_weight in ["0", "0p1", "0p2"]:
+        for idx, variant in enumerate(["tecsf", "no_lccoins", "preset_low_carbon"], start=1):
             for seed in [1, 2]:
-                lccoins.append(_run_row(f"kappa_{kappa}__aq_1__ao_0p5", variant, seed, scale=1.0 + idx * 0.03))
+                label = f"stock_{asset_weight}__inc_{asset_weight}__ce_1__cr_0p5"
+                lccoins.append(_run_row(label, variant, seed, scale=1.0 + idx * 0.03))
     _write_summary(root, "lccoins_sensitivity", lccoins)
 
     network = []

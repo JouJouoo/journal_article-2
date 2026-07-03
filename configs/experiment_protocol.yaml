@@ -3,9 +3,11 @@ calibration:
   seeds: [7, 42, 100]
   eval_seed_start: 100000
   lccoins:
-    kappa_values: [0.0, 0.1, 0.2, 0.5]
-    alpha_q_values: [0.5, 1.0, 1.5]
-    alpha_offset_values: [0.25, 0.5, 1.0]
+    stock_utility_weights: [0.0, 0.1, 0.2, 0.5]
+    increment_utility_weights: [0.0, 0.1, 0.2, 0.5]
+    clean_energy_weights: [0.5, 1.0, 1.5]
+    carbon_reduction_weights: [0.5, 1.0, 1.5]
+    minting_coefficients: [1.0]
   clearing:
     violation_penalty_values: [10.0, 20.0, 40.0]
     repair_shrink_values: [0.7, 0.8, 0.9]

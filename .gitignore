@@ -2,6 +2,7 @@ __pycache__/
 .pytest_cache/
 .vscode/
 .codex_resources_*.json
+.claude_resources.json
 *.pyc
 *.pyo
 *.pt

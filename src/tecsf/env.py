@@ -11,15 +11,16 @@ from tecsf.config import ExperimentConfig
 from tecsf.data import SyntheticScenario, generate_synthetic_scenario
 from tecsf.market import (
     ACTION_DIM,
-    ActionBatch,
     clear_market,
-    normalize_physical_actions,
+    p2p_reference_price,
     scale_raw_actions,
 )
 from tecsf.variants import VariantSpec, get_variant
 
 
-OBS_DIM = 20
+P2P_REF_PRICE_OBS_INDEX = 3
+ASSET_BALANCE_OBS_INDEX = 6
+OBS_DIM = 7
 
 
 @dataclass
@@ -63,15 +64,12 @@ class EnergyCarbonEnv:
         self.chain = SimulatedTECSChain(config, self.num_agents)
         self.t = 0
         self.soc = np.full(self.num_agents, config.storage.init_soc, dtype=np.float32)
-        self.prev_feedback = np.zeros((self.num_agents, 8), dtype=np.float32)
-        self.prev_actions = np.zeros((self.num_agents, ACTION_DIM), dtype=np.float32)
         self.last_p2p = np.zeros((self.num_agents, self.num_agents), dtype=np.float32)
         self.last_grid_buy = np.zeros(self.num_agents, dtype=np.float32)
         self.last_grid_sell = np.zeros(self.num_agents, dtype=np.float32)
         self.last_voltages = np.ones(self.scenario.num_nodes, dtype=np.float32)
         self.last_violations = np.zeros(4, dtype=np.float32)
         self.lagrange = np.zeros(4, dtype=np.float32)
-        self.lccoins_reward_weight = float(config.lccoins.kappa)
 
     def reset(self, seed: int | None = None):
         if seed is not None:
@@ -79,8 +77,6 @@ class EnergyCarbonEnv:
         self.chain = SimulatedTECSChain(self.config, self.num_agents)
         self.t = 0
         self.soc = np.full(self.num_agents, self.config.storage.init_soc, dtype=np.float32)
-        self.prev_feedback.fill(0.0)
-        self.prev_actions.fill(0.0)
         self.last_p2p.fill(0.0)
         self.last_grid_buy.fill(0.0)
         self.last_grid_sell.fill(0.0)
@@ -88,7 +84,6 @@ class EnergyCarbonEnv:
         self.last_violations.fill(0.0)
         if not self.config.clearing.preserve_lagrange_on_reset:
             self.lagrange.fill(0.0)
-        self.lccoins_reward_weight = float(self.config.lccoins.kappa)
         obs = self._observation()
         return obs, self._global_state(obs), {}
 
@@ -104,17 +99,25 @@ class EnergyCarbonEnv:
         clear_seconds = perf_counter() - clear_start
 
         settlement_start = perf_counter()
+        lccoins_balance_before = self.chain.lccoins_balances.copy()
         if self.variant.use_chain:
             record = self.chain.settle(package, enable_lccoins=self.variant.use_lccoins)
         else:
             record = self.chain.bypass_settlement(
                 package, enable_lccoins=self.variant.use_lccoins
             )
+        lccoins_balance_after = self.chain.lccoins_balances.copy()
         settlement_seconds = perf_counter() - settlement_start
 
         lccoins = self._settled_lccoins(record)
         reward_start = perf_counter()
-        rewards, info = self._rewards(package, record, lccoins)
+        rewards, info = self._rewards(
+            package,
+            record,
+            lccoins,
+            lccoins_balance_before,
+            lccoins_balance_after,
+        )
         info["clear_seconds"] = float(clear_seconds)
         info["settlement_seconds"] = float(settlement_seconds)
         info["reward_seconds"] = float(perf_counter() - reward_start)
@@ -129,7 +132,6 @@ class EnergyCarbonEnv:
             )
         else:
             violation_vec = np.zeros(4, dtype=np.float32)
-        self._update_lccoins_reward_weight(record, violation_vec)
 
         self.soc = package.soc_next.copy()
         self.last_p2p = package.p2p_power.copy()
@@ -137,17 +139,6 @@ class EnergyCarbonEnv:
         self.last_grid_sell = package.grid_sell.copy()
         self.last_voltages = package.voltages.copy()
         self.last_violations = violation_vec
-        executed_actions = ActionBatch(
-            q_buy=package.actions.q_buy,
-            q_sell=package.actions.q_sell,
-            price_buy=package.actions.price_buy,
-            price_sell=package.actions.price_sell,
-            charge=package.charge,
-            discharge=package.discharge,
-        )
-        self.prev_actions = normalize_physical_actions(executed_actions, self.config)
-        self.prev_feedback = self._feedback(package, lccoins) if self.variant.use_feedback and record.settled else np.zeros_like(self.prev_feedback)
-
         self.t += 1
         terminated = self.t >= self.scenario.horizon
         obs = self._observation()
@@ -278,24 +269,32 @@ class EnergyCarbonEnv:
         load = self.scenario.load[:, idx]
         pv = self.scenario.pv[:, idx]
         soc_norm = self.soc / max(self.config.storage.capacity, 1e-8)
-        buy_price = np.full(self.num_agents, self.scenario.grid_buy_price[idx], dtype=np.float32)
-        sell_price = np.full(self.num_agents, self.scenario.grid_sell_price[idx], dtype=np.float32)
-        gamma_prev = np.full(
+        p2p_ref_price = np.full(
             self.num_agents,
-            self.scenario.grid_emission_factor[self.scenario.time_index(self.t - 1)],
+            self._p2p_reference_price(self.t),
             dtype=np.float32,
         )
+        buy_price = np.full(self.num_agents, self.scenario.grid_buy_price[idx], dtype=np.float32)
+        sell_price = np.full(self.num_agents, self.scenario.grid_sell_price[idx], dtype=np.float32)
         parts = [
             load.reshape(-1, 1),
             pv.reshape(-1, 1),
             soc_norm.reshape(-1, 1),
+            p2p_ref_price.reshape(-1, 1),
             buy_price.reshape(-1, 1),
             sell_price.reshape(-1, 1),
-            gamma_prev.reshape(-1, 1),
-            self.prev_feedback,
-            self.prev_actions,
+            self._normalized_lccoins_balance().reshape(-1, 1),
         ]
         return np.concatenate(parts, axis=1).astype(np.float32)
+
+    def _p2p_reference_price(self, t: int) -> float:
+        return p2p_reference_price(self.scenario, self.config, t)
+
+    def _normalized_lccoins_balance(self) -> np.ndarray:
+        if not self.variant.use_asset_observation:
+            return np.zeros(self.num_agents, dtype=np.float32)
+        scale = max(float(self.config.lccoins.balance_norm), 1e-8)
+        return (self.chain.lccoins_balances / scale).astype(np.float32)
 
     def _global_state(self, obs: np.ndarray) -> np.ndarray:
         return np.concatenate(
@@ -309,22 +308,6 @@ class EnergyCarbonEnv:
             ]
         ).astype(np.float32)
 
-    def _feedback(self, package, lccoins: np.ndarray) -> np.ndarray:
-        c = package.carbon
-        return np.stack(
-            [
-                c.e_grid,
-                c.e_pv_credit,
-                c.c_offset,
-                c.a_buy,
-                c.c_sell,
-                c.e_resp,
-                lccoins,
-                c.carbon_reduction,
-            ],
-            axis=1,
-        ).astype(np.float32)
-
     def _settled_lccoins(self, record: SettlementRecord) -> np.ndarray:
         out = np.zeros(self.num_agents, dtype=np.float32)
         if not record.settled or not self.variant.use_lccoins:
@@ -333,46 +316,23 @@ class EnergyCarbonEnv:
             out[int(agent)] = float(amount)
         return out
 
-    def _lccoins_reward_signal(self, package, lccoins: np.ndarray) -> np.ndarray:
-        if self.variant.use_preset_low_carbon_reward:
-            return package.carbon.lccoins_candidate.astype(np.float32)
-        return lccoins.astype(np.float32)
-
-    def _lccoins_reward(self, signal: np.ndarray) -> tuple[np.ndarray, float, float, float]:
+    def _crra_utility(self, balance: np.ndarray) -> np.ndarray:
         cfg = self.config.lccoins
-        weight = (
-            float(self.lccoins_reward_weight)
-            if str(cfg.reward_mode).lower() == "adaptive"
-            else float(cfg.kappa)
-        )
-        raw = weight * signal.astype(np.float32)
-        clip = float(cfg.reward_clip)
-        clipped = np.clip(raw, -clip, clip) if clip > 0.0 else raw
-        return clipped.astype(np.float32), weight, float(raw.sum()), float(clipped.sum())
-
-    def _update_lccoins_reward_weight(
-        self, record: SettlementRecord, violation_vec: np.ndarray
-    ) -> None:
-        cfg = self.config.lccoins
-        if str(cfg.reward_mode).lower() != "adaptive":
-            self.lccoins_reward_weight = float(cfg.kappa)
-            return
-        violation_risk = float(np.maximum(violation_vec, 0.0).sum())
-        rejection_risk = 0.0 if record.settled else 1.0
-        denom = (
-            1.0
-            + float(cfg.adaptive_violation_gain) * violation_risk
-            + float(cfg.adaptive_rejection_gain) * rejection_risk
-        )
-        target = float(cfg.kappa) / max(denom, 1e-8)
-        beta = float(np.clip(cfg.adaptive_ema, 0.0, 1.0))
-        updated = (1.0 - beta) * float(self.lccoins_reward_weight) + beta * target
-        self.lccoins_reward_weight = float(
-            np.clip(updated, float(cfg.kappa_min), float(cfg.kappa_max))
-        )
+        shifted = np.maximum(balance.astype(np.float64) + float(cfg.crra_b0), 1e-8)
+        rho = float(cfg.crra_rho)
+        if abs(rho - 1.0) <= 1e-8:
+            utility = np.log(shifted)
+        else:
+            utility = ((shifted ** (1.0 - rho)) - 1.0) / (1.0 - rho)
+        return utility.astype(np.float32)
 
     def _rewards(
-        self, package, record: SettlementRecord, lccoins: np.ndarray
+        self,
+        package,
+        record: SettlementRecord,
+        lccoins: np.ndarray,
+        lccoins_balance_before: np.ndarray,
+        lccoins_balance_after: np.ndarray,
     ) -> tuple[np.ndarray, dict]:
         idx = self.scenario.time_index(package.epoch)
         dt = self.scenario.delta_t
@@ -391,10 +351,21 @@ class EnergyCarbonEnv:
             self.config.clearing.load_shed_penalty * load_shed
             + self.config.clearing.pv_curtail_penalty * pv_curtailment
         )
-        lc_signal = self._lccoins_reward_signal(package, lccoins)
-        lc_reward, lccoins_weight, lccoins_reward_raw, lccoins_reward_clipped = (
-            self._lccoins_reward(lc_signal)
-        )
+        utility_before = self._crra_utility(lccoins_balance_before)
+        utility_stock = self._crra_utility(lccoins_balance_after)
+        utility_increment = utility_stock - utility_before
+        if self.variant.use_asset_utility and self.variant.use_lccoins:
+            agent_reward_coin = (
+                float(self.config.lccoins.stock_utility_weight) * utility_stock
+                + float(self.config.lccoins.increment_utility_weight) * utility_increment
+            )
+        elif self.variant.use_preset_low_carbon_reward:
+            agent_reward_coin = (
+                float(self.config.lccoins.increment_utility_weight)
+                * package.carbon.lccoins_candidate.astype(np.float32)
+            )
+        else:
+            agent_reward_coin = np.zeros(self.num_agents, dtype=np.float32)
         violation_vec = np.asarray(
             [package.violations[k] for k in ("voltage", "line", "soc", "trade")],
             dtype=np.float32,
@@ -417,7 +388,7 @@ class EnergyCarbonEnv:
         penalty = action_bound_penalty
         if self.variant.use_lagrange:
             penalty += lagrange_penalty + fixed_penalty
-        agent_profit = (
+        agent_reward_eco = (
             p2p_revenue
             + grid_revenue
             - p2p_cost
@@ -425,8 +396,8 @@ class EnergyCarbonEnv:
             - op_cost
             - carbon_cost
             - emergency_cost
-            + lc_reward
         )
+        agent_profit = agent_reward_eco + agent_reward_coin
         rewards = agent_profit.copy()
         rewards = rewards - penalty / max(self.num_agents, 1)
         if not record.settled:
@@ -475,16 +446,33 @@ class EnergyCarbonEnv:
             "low_carbon_sell": float(package.carbon.c_sell.sum()),
             "carbon_reduction": float(package.carbon.carbon_reduction.sum()),
             "lccoins": float(lccoins.sum()),
-            "lccoins_reward_weight": float(lccoins_weight),
-            "lccoins_reward_raw": float(lccoins_reward_raw),
-            "lccoins_reward_clipped": float(lccoins_reward_clipped),
             "agent_lccoins": lccoins.astype(float).tolist(),
+            "agent_lccoins_balance": lccoins_balance_after.astype(float).tolist(),
+            "agent_lccoins_asset_state": (
+                lccoins_balance_after / max(float(self.config.lccoins.balance_norm), 1e-8)
+            ).astype(float).tolist(),
+            "agent_reward_eco": agent_reward_eco.astype(float).tolist(),
+            "agent_reward_coin": agent_reward_coin.astype(float).tolist(),
+            "agent_utility_stock": utility_stock.astype(float).tolist(),
+            "agent_utility_increment": utility_increment.astype(float).tolist(),
             "agent_q_lc": package.carbon.q_lc.astype(float).tolist(),
             "agent_c_offset": package.carbon.c_offset.astype(float).tolist(),
             "agent_c_sell": package.carbon.c_sell.astype(float).tolist(),
             "agent_lccoins_candidate": package.carbon.lccoins_candidate.astype(float).tolist(),
+            "agent_low_carbon_contribution": package.carbon.low_carbon_contribution.astype(float).tolist(),
             "agent_profit": agent_profit.astype(float).tolist(),
             "agent_carbon_emission": package.carbon.e_grid.astype(float).tolist(),
+            "consensus_confirmed": [
+                bool(record.consensus_confirmed.get(agent, False))
+                for agent in range(self.num_agents)
+            ],
+            "consensus_votes": [
+                int(record.consensus_votes.get(agent, 0))
+                for agent in range(self.num_agents)
+            ],
+            "consensus_threshold": int(record.consensus_threshold),
+            "p2p_reference_price": float(self._p2p_reference_price(package.epoch)),
+            "p2p_matrix": package.p2p_power.astype(float).tolist(),
             "p2p_energy": float(package.p2p_power.sum() * dt),
             "attempted_p2p_energy": float(package.attempted_p2p_power.sum() * dt),
             "grid_buy_cost": float(grid_cost.sum()),

@@ -50,7 +50,7 @@ def _summarize(seeds: list[str], values: np.ndarray, tail: int) -> dict:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Plot multi-seed TECSF training curves.")
+    parser = argparse.ArgumentParser(description="Plot multi-seed LC-MAPPO training curves.")
     parser.add_argument(
         "--run-dir",
         default="outputs/tecsf_chain_1000_multiseed_20260527",
@@ -122,7 +122,7 @@ def main() -> None:
         linewidth=0,
         label="Mean +/- std",
     )
-    ax.set_title("TECSF training reward across random seeds")
+    ax.set_title("LC-MAPPO training reward across random seeds")
     ax.set_xlabel("Episode")
     ax.set_ylabel("Mean episode reward")
     style_axes(ax)

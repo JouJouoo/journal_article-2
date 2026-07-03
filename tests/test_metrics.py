@@ -34,9 +34,6 @@ def test_summarize_episode_exports_extended_metrics():
             "action_bound_penalty": 0.03,
             "safety_adjustment": 0.4,
             "repair_iterations": 2.0,
-            "lccoins_reward_raw": 0.2,
-            "lccoins_reward_clipped": 0.1,
-            "lccoins_reward_weight": 0.2,
             "clear_seconds": 0.01,
             "settlement_seconds": 0.02,
             "reward_seconds": 0.03,
@@ -93,7 +90,6 @@ def test_summarize_episode_exports_extended_metrics():
     assert summary["pv_curtailment"] == 0.2
     assert summary["safety_adjustment"] == 0.4
     assert summary["repair_iterations"] == 2.0
-    assert summary["lccoins_reward_weight_mean"] == 0.1
     assert summary["clear_seconds"] == 0.01
     assert summary["settlement_seconds"] == 0.02
     assert summary["reward_seconds"] == 0.03

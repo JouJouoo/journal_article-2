@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import time
@@ -30,6 +31,9 @@ class SettlementRecord:
     energy_payments: list[dict] = field(default_factory=list)
     carbon_entries: list[dict] = field(default_factory=list)
     lccoins: dict[int, float] = field(default_factory=dict)
+    consensus_confirmed: dict[int, bool] = field(default_factory=dict)
+    consensus_votes: dict[int, int] = field(default_factory=dict)
+    consensus_threshold: int = 0
 
     @property
     def settled(self) -> bool:
@@ -209,14 +213,116 @@ class SettlementEngine:
     def _mint_lccoins(
         self, package: ClearingPackage, record: SettlementRecord
     ) -> None:
+        threshold = self._consensus_threshold()
+        record.consensus_threshold = threshold
         for agent in range(self.num_agents):
             key = (record.record_id, agent, package.epoch)
             if key in self.minted_keys:
                 raise RuntimeError(f"duplicate Lccoins mint for {key}")
             amount = float(package.carbon.lccoins_candidate[agent])
+            votes = self._lccoins_consensus_votes(package, agent, amount)
+            confirmed = votes >= threshold
+            record.consensus_votes[agent] = votes
+            record.consensus_confirmed[agent] = confirmed
+            if not confirmed:
+                continue
             self.minted_keys.add(key)
             self.lccoins_balances[agent] += amount
             record.lccoins[agent] = amount
+
+    def _consensus_threshold(self) -> int:
+        validators = max(int(self.config.lccoins.validator_count), 1)
+        configured = int(self.config.lccoins.consensus_threshold)
+        if configured > 0:
+            return configured
+        return int(math.ceil(2.0 * validators / 3.0))
+
+    def _lccoins_consensus_votes(
+        self,
+        package: ClearingPackage,
+        agent: int,
+        candidate_amount: float,
+    ) -> int:
+        validators = max(int(self.config.lccoins.validator_count), 1)
+        if not self._lccoins_record_is_valid(package, agent, candidate_amount):
+            return 0
+        return validators
+
+    def _lccoins_record_is_valid(
+        self,
+        package: ClearingPackage,
+        agent: int,
+        candidate_amount: float,
+    ) -> bool:
+        tolerance = max(float(self.config.clearing.network_tolerance), 1e-6)
+        if not np.isfinite(candidate_amount) or candidate_amount < -tolerance:
+            return False
+
+        if not np.all(np.isfinite(package.p2p_power)):
+            return False
+        if np.any(package.p2p_power < -tolerance):
+            return False
+        if np.maximum(np.diag(package.p2p_power), 0.0).sum() > tolerance:
+            return False
+
+        p2p_sold_by_agent = package.p2p_power.sum(axis=1)
+        p2p_sold = float(p2p_sold_by_agent.sum())
+        p2p_bought = float(package.p2p_power.sum(axis=0).sum())
+        if abs(p2p_sold - p2p_bought) > tolerance:
+            return False
+
+        q_lc = float(package.carbon.q_lc[agent])
+        carbon_reduction = float(package.carbon.carbon_reduction[agent])
+        if q_lc < -tolerance or carbon_reduction < -tolerance:
+            return False
+
+        dt = float(self.config.scenario.delta_t)
+        expected_q_lc = (
+            min(
+                float(package.effective_pv[agent]),
+                float(package.effective_load[agent])
+                + float(package.charge[agent])
+                + float(p2p_sold_by_agent[agent]),
+            )
+            * dt
+        )
+        if abs(q_lc - expected_q_lc) > max(tolerance, 1e-5):
+            return False
+
+        gamma_grid = float(package.carbon.grid_emission_factor)
+        if not np.isfinite(gamma_grid) or gamma_grid < -tolerance:
+            return False
+        expected_grid_emission = gamma_grid * float(package.grid_buy[agent]) * dt
+        if abs(float(package.carbon.e_grid[agent]) - expected_grid_emission) > max(
+            tolerance, 1e-5
+        ):
+            return False
+
+        expected_baseline = gamma_grid * (
+            float(package.effective_load[agent]) + float(package.charge[agent])
+        ) * dt
+        if abs(float(package.carbon.baseline_emission[agent]) - expected_baseline) > max(
+            tolerance, 1e-5
+        ):
+            return False
+
+        expected_carbon_reduction = max(0.0, expected_baseline - expected_grid_emission)
+        if abs(carbon_reduction - expected_carbon_reduction) > max(tolerance, 1e-5):
+            return False
+
+        contribution = (
+            float(self.config.lccoins.clean_energy_weight) * q_lc
+            + float(self.config.lccoins.carbon_reduction_weight) * carbon_reduction
+        )
+        if abs(
+            float(package.carbon.low_carbon_contribution[agent])
+            - max(contribution, 0.0)
+        ) > max(tolerance, 1e-5):
+            return False
+        expected = float(self.config.lccoins.minting_coefficient) * max(
+            contribution, 0.0
+        )
+        return abs(candidate_amount - expected) <= max(tolerance, 1e-5)
 
 
 class SimulatedTECSChain:

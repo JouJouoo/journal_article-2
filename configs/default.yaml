@@ -42,18 +42,16 @@ storage:
   op_cost: 0.01
 
 lccoins:
-  alpha_q: 1.0
-  alpha_offset: 0.5
-  kappa: 0.2
-  q_norm: 5.0
-  offset_norm: 3.0
-  reward_mode: adaptive
-  reward_clip: 0.5
-  kappa_min: 0.0
-  kappa_max: 0.5
-  adaptive_ema: 0.2
-  adaptive_violation_gain: 2.0
-  adaptive_rejection_gain: 1.0
+  clean_energy_weight: 1.0
+  carbon_reduction_weight: 1.0
+  minting_coefficient: 1.0
+  crra_rho: 0.5
+  crra_b0: 1.0
+  stock_utility_weight: 0.1
+  increment_utility_weight: 0.2
+  balance_norm: 10.0
+  validator_count: 4
+  consensus_threshold: 0
 
 clearing:
   enable_dynamic_action_bounds: true
@@ -84,6 +82,8 @@ rl:
   gamma: 0.98
   gae_lambda: 0.95
   clip_eps: 0.2
+  clip_eps_min: 0.1
+  clip_eps_max: 0.3
   entropy_coef: 0.01
   value_coef: 0.5
   max_grad_norm: 0.5

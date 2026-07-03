@@ -22,12 +22,16 @@ def test_label_parsing_and_display_names():
     style = _load_style_module()
 
     assert style.display_variant("no_lccoins") == "w/o LCCoins"
-    assert style.display_variant("tecsf") == "TECSF"
+    assert style.display_variant("tecsf") == "LC-MAPPO"
+    assert style.display_variant("lc_mappo") == "LC-MAPPO"
+    assert style.variant_color("lc_mappo") == style.variant_color("tecsf")
 
-    parsed = style.parse_label("kappa_0p2__aq_1__ao_0p5")
-    assert parsed["kappa"] == 0.2
-    assert parsed["aq"] == 1
-    assert parsed["ao"] == 0.5
+    parsed = style.parse_label("stock_0p2__inc_0p1__ce_1__cr_0p5")
+    assert parsed["stock"] == 0.2
+    assert parsed["inc"] == 0.1
+    assert parsed["ce"] == 1
+    assert parsed["cr"] == 0.5
+    assert style.format_label("stock_0p2__inc_0p1__ce_1__cr_0p5") == "stock=0.2, inc=0.1"
     assert style.format_label("agents_16__nodes_9") == "16 agents / 9 nodes"
     assert style.format_label("line_0p7__trade_1p3") == "line=0.7, trade=1.3"
 

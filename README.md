@@ -10,7 +10,7 @@ The first version is intentionally local and lightweight:
 - carbon responsibility, carbon allowance purchase, low-carbon contribution sale;
 - local TECS-Chain settlement simulator with atomic state transitions;
 - LCCoins minted only from settled records;
-- settlement-feedback recurrent MAPPO training in PyTorch;
+- low-carbon-asset-aware MAPPO training in PyTorch;
 - synthetic scenario generation for out-of-the-box experiments.
 
 ## Quick Start
@@ -60,7 +60,7 @@ directory. This does not re-run training or evaluation; it only redraws figures
 from existing `summary.json`, metrics, statistics, and Pareto outputs:
 
 ```powershell
-& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\plot_paper_figures.py outputs\report_experiments_20260528_1000 --output-dir outputs\report_experiments_20260528_1000\paper_figures
+& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\plot_paper_figures.py outputs\report_experiments_20260601_fixed --output-dir outputs\report_experiments_20260601_fixed\paper_figures
 ```
 
 The paper-figure exporter writes `fig1_main_comparison`,
@@ -84,7 +84,7 @@ re-running the earlier grids:
 ```powershell
 & "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\run_improved_experiment_suite.py --quick --benchmark-cases ieee33bw ieee69 --device cpu --jobs 1 --output-dir outputs\improved_suite_quick
 & "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\run_improved_experiment_suite.py --benchmark-cases ieee33bw ieee69 --device cpu --jobs 3 --output-dir outputs\improved_suite_1000
-& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\run_improved_experiment_suite.py --benchmark-only --benchmark-cases ieee33bw ieee69 --episodes 1000 --eval-episodes 20 --seeds 7 42 100 2026 3407 --device cpu --jobs 3 --output-dir outputs\report_experiments_20260528_1000
+& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\run_improved_experiment_suite.py --benchmark-only --benchmark-cases ieee33bw ieee69 --episodes 1000 --eval-episodes 20 --seeds 7 42 100 2026 3407 --device cpu --jobs 3 --output-dir outputs\report_experiments_20260601_fixed
 ```
 
 The protocol split in `configs/experiment_protocol.yaml` separates calibration,
@@ -132,7 +132,7 @@ or `case69.m` are unavailable:
 Export a simulated TECS-Chain ledger from a trained checkpoint:
 
 ```powershell
-& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\export_ledger.py outputs\tecsf_only_fixed_env_1000_20260527_151553\tecsf_checkpoint.pt --episodes 1 --output-dir outputs\ledger_export
+& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\export_ledger.py outputs\<run>\tecsf_checkpoint.pt --episodes 1 --output-dir outputs\ledger_export
 ```
 
 The exported ledger contains blocks, settlement transactions, execution receipts,
@@ -140,15 +140,14 @@ state roots, event logs, final balances, and LCCoins mint records.
 
 ## Main Variants
 
-- `tecsf`: full settlement-feedback framework.
+- `tecsf`: full low-carbon-asset-aware MAPPO framework.
 - `no_chain`: bypasses TECS-Chain atomic settlement.
 - `no_lccoins`: keeps settlement but removes LCCoins reward.
-- `no_feedback`: removes previous confirmed settlement feedback from observations.
-- `mappo`: uses the same environment without recurrent hidden-state feedback.
+- `mappo`: uses the same environment without LCCoins asset observation or recurrent policy state.
 - `constrained_mappo`: Lagrangian/safety-shield MAPPO without TECS-Chain,
-  LCCoins, or settlement feedback, used as a constrained RL baseline.
+  LCCoins, or low-carbon asset utility, used as a constrained RL baseline.
 - `safety_only`: keeps learning and safety penalties but removes TECS-Chain,
-  LCCoins, and settlement feedback to isolate the safety shield contribution.
+  LCCoins, and low-carbon asset utility to isolate the safety shield contribution.
 - `myopic_opt`: deterministic one-step dispatch optimizer over storage and grid
   exchange, used as a lightweight optimization baseline.
 - `greedy_feasible`: deterministic non-learning baseline that greedily uses
@@ -161,8 +160,10 @@ state roots, event logs, final balances, and LCCoins mint records.
 
 - `configs/default.yaml`: default synthetic scenario and training settings.
 - `src/tecsf/`: implementation modules.
-- `scripts/`: command-line entry points.
+- `scripts/`: command-line entry points and dated workflow launchers.
 - `tests/`: unit and smoke tests.
+- `docs/`: manuscript, experiment protocol/report, and literature materials.
+- `outputs/`: generated experiment artifacts. This directory is ignored by Git; keep only paper-facing result sets that still need local inspection.
 
 ## Safety and Reporting Improvements
 

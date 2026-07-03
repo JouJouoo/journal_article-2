@@ -19,7 +19,8 @@ OKABE_ITO = [
 ]
 
 METHOD_DISPLAY_NAMES = {
-    "tecsf": "TECSF",
+    "tecsf": "LC-MAPPO",
+    "lc_mappo": "LC-MAPPO",
     "mappo": "MAPPO",
     "constrained_mappo": "Constrained MAPPO",
     "myopic_opt": "Myopic opt.",
@@ -27,7 +28,6 @@ METHOD_DISPLAY_NAMES = {
     "heuristic": "Heuristic",
     "no_chain": "w/o chain",
     "no_lccoins": "w/o LCCoins",
-    "no_feedback": "w/o feedback",
     "no_lagrange": "w/o Lagrange",
     "preset_low_carbon": "Preset low-carbon",
     "safety_only": "Safety only",
@@ -35,12 +35,12 @@ METHOD_DISPLAY_NAMES = {
 
 METHOD_COLORS = {
     "tecsf": "#0072B2",
+    "lc_mappo": "#0072B2",
     "mappo": "#D55E00",
     "myopic_opt": "#009E73",
     "heuristic": "#666666",
     "no_chain": "#56B4E9",
     "no_lccoins": "#CC79A7",
-    "no_feedback": "#E69F00",
     "no_lagrange": "#D55E00",
     "preset_low_carbon": "#009E73",
     "constrained_mappo": "#9467BD",
@@ -49,12 +49,12 @@ METHOD_COLORS = {
 
 METHOD_ORDER = [
     "tecsf",
+    "lc_mappo",
     "mappo",
     "myopic_opt",
     "heuristic",
     "no_chain",
     "no_lccoins",
-    "no_feedback",
     "no_lagrange",
     "preset_low_carbon",
     "constrained_mappo",
@@ -170,8 +170,8 @@ def label_value(label: str, key: str, default: float | int | str | None = None):
 
 def format_label(label: str) -> str:
     parsed = parse_label(label)
-    if "kappa" in parsed:
-        return f"kappa={parsed['kappa']}"
+    if "stock" in parsed and "inc" in parsed:
+        return f"stock={parsed['stock']}, inc={parsed['inc']}"
     if "line" in parsed and "trade" in parsed:
         return f"line={parsed['line']}, trade={parsed['trade']}"
     if "agents" in parsed and "nodes" in parsed:

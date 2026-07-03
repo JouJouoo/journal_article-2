@@ -28,8 +28,8 @@ from figure_style import (
 )
 
 
-MAIN_VARIANTS = ["tecsf", "mappo", "no_lccoins", "no_lagrange", "preset_low_carbon"]
-LCCOINS_VARIANTS = ["tecsf", "no_feedback", "no_lccoins", "preset_low_carbon"]
+MAIN_VARIANTS = ["tecsf", "constrained_mappo", "safety_only", "myopic_opt", "heuristic"]
+LCCOINS_VARIANTS = ["tecsf", "no_lccoins", "preset_low_carbon"]
 NETWORK_VARIANTS = ["tecsf", "heuristic", "no_lagrange"]
 BENCHMARK_VARIANTS = ["tecsf", "myopic_opt", "heuristic"]
 
@@ -326,7 +326,7 @@ def plot_fig2_safety_stress(
     no_lagrange_violation, _, _ = _network_matrix(rows, "no_lagrange", "eval_max_violation")
 
     fig, axes = plt.subplots(2, 2, figsize=(7.2, 6.2), constrained_layout=True)
-    im0 = _draw_heatmap(axes[0, 0], tecsf_success, trades, lines, "TECSF success rate", "viridis", 0, 1)
+    im0 = _draw_heatmap(axes[0, 0], tecsf_success, trades, lines, "LC-MAPPO success rate", "viridis", 0, 1)
     fig.colorbar(im0, ax=axes[0, 0], fraction=0.046, pad=0.02)
     im1 = _draw_heatmap(axes[0, 1], no_lagrange_success, trades, lines, "w/o Lagrange success rate", "viridis", 0, 1)
     fig.colorbar(im1, ax=axes[0, 1], fraction=0.046, pad=0.02)
@@ -339,34 +339,42 @@ def plot_fig2_safety_stress(
     return save_publication_figure(fig, output_dir / "fig2_safety_stress", formats=formats, dpi=dpi)
 
 
-def _kappa_series(rows: list[dict], variant: str, metric: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    kappas = sorted({float(label_value(str(row.get("label", "")), "kappa", 0.0)) for row in rows})
+def _asset_weight_series(rows: list[dict], variant: str, metric: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    asset_weights = sorted({float(label_value(str(row.get("label", "")), "stock", 0.0)) for row in rows})
     means = []
     cis = []
-    for kappa in kappas:
+    for asset_weight in asset_weights:
         values = [
             float(row[metric])
             for row in rows
             if row.get("variant") == variant
-            and float(label_value(str(row.get("label", "")), "kappa", -1.0)) == kappa
+            and float(label_value(str(row.get("label", "")), "stock", -1.0)) == asset_weight
             and isinstance(row.get(metric), (int, float))
         ]
         mean, _, ci = mean_std_ci(values)
         means.append(mean)
         cis.append(ci)
-    return np.asarray(kappas), np.asarray(means), np.asarray(cis)
+    return np.asarray(asset_weights), np.asarray(means), np.asarray(cis)
 
 
-def _plot_kappa_metric(ax, rows: list[dict], variants: list[str], metric: str, title: str, ylabel: str, annotate=False) -> None:
+def _plot_asset_weight_metric(
+    ax,
+    rows: list[dict],
+    variants: list[str],
+    metric: str,
+    title: str,
+    ylabel: str,
+    annotate=False,
+) -> None:
     for variant in variants:
-        x, means, cis = _kappa_series(rows, variant, metric)
+        x, means, cis = _asset_weight_series(rows, variant, metric)
         color = variant_color(variant)
         ax.plot(x, means, marker="o", linewidth=1.4, color=color, label=display_variant(variant))
         ax.fill_between(x, means - cis, means + cis, color=color, alpha=0.12, linewidth=0)
     ax.axvline(0.1, color="#666666", linestyle="--", linewidth=0.8)
     if annotate:
-        ax.text(0.105, 0.05, "kappa=0.1\nweak stability", transform=ax.get_xaxis_transform(), fontsize=6)
-    ax.set_xlabel("kappa")
+        ax.text(0.105, 0.05, "weight=0.1\nweak stability", transform=ax.get_xaxis_transform(), fontsize=6)
+    ax.set_xlabel("Asset utility weight")
     ax.set_ylabel(ylabel)
     ax.set_title(title)
     style_axes(ax)
@@ -389,7 +397,7 @@ def plot_fig3_lccoins_sensitivity(
         ("eval_max_violation", "Constraint violation", "Max violation", False),
     ]
     for ax, (metric, title, ylabel, annotate) in zip(axes.reshape(-1), panels):
-        _plot_kappa_metric(ax, rows, variants, metric, title, ylabel, annotate=annotate)
+        _plot_asset_weight_metric(ax, rows, variants, metric, title, ylabel, annotate=annotate)
     axes.reshape(-1)[-1].axis("off")
     handles, labels = axes[0, 0].get_legend_handles_labels()
     axes.reshape(-1)[-1].legend(handles, labels, frameon=False, loc="center")
@@ -446,7 +454,7 @@ def _plot_runtime_ratio(ax, rows: list[dict]) -> None:
     ax.bar(x, tecsf_ratio, color=variant_color("tecsf"), width=0.6)
     ax.axhline(1.0, color="#111111", linestyle="--", linewidth=0.8)
     ax.set_xticks(x, [format_label(label) for label in labels], rotation=25, ha="right")
-    ax.set_ylabel("TECSF / heuristic time")
+    ax.set_ylabel("LC-MAPPO / heuristic time")
     ax.set_title("Relative runtime")
     style_axes(ax)
 
@@ -472,7 +480,7 @@ def _plot_scalability_boundary(ax, rows: list[dict]) -> None:
     ax.set_yticks(np.arange(len(agents)), [str(item) for item in agents])
     ax.set_xlabel("Nodes")
     ax.set_ylabel("Agents")
-    ax.set_title("TECSF scalability boundary")
+    ax.set_title("LC-MAPPO scalability boundary")
     for i in range(matrix.shape[0]):
         for j in range(matrix.shape[1]):
             if np.isfinite(matrix[i, j]):
@@ -504,6 +512,7 @@ def plot_all(
     output_dir: str | Path | None = None,
     formats: Iterable[str] = ("pdf", "svg", "png"),
     dpi: int = 600,
+    skip_ablations: bool = False,
 ) -> dict[str, list[Path]]:
     apply_publication_style()
     root = Path(root)
@@ -511,23 +520,41 @@ def plot_all(
     output_dir.mkdir(parents=True, exist_ok=True)
     outputs = {
         "fig1_main_comparison": plot_fig1_main_comparison(root, output_dir, formats=formats, dpi=dpi),
-        "fig2_safety_stress": plot_fig2_safety_stress(root, output_dir, formats=formats, dpi=dpi),
-        "fig3_lccoins_sensitivity": plot_fig3_lccoins_sensitivity(root, output_dir, formats=formats, dpi=dpi),
         "fig4_generalization_scalability": plot_fig4_generalization_scalability(root, output_dir, formats=formats, dpi=dpi),
     }
+    if not skip_ablations:
+        outputs.update(
+            {
+                "fig2_safety_stress": plot_fig2_safety_stress(root, output_dir, formats=formats, dpi=dpi),
+                "fig3_lccoins_sensitivity": plot_fig3_lccoins_sensitivity(
+                    root, output_dir, formats=formats, dpi=dpi
+                ),
+            }
+        )
     plt.close("all")
     return outputs
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Create publication-oriented TECSF paper figures.")
+    parser = argparse.ArgumentParser(description="Create publication-oriented LC-MAPPO paper figures.")
     parser.add_argument("root", help="Experiment report root containing suite summary.json files.")
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--formats", nargs="+", default=["pdf", "svg", "png"])
     parser.add_argument("--dpi", type=int, default=600)
+    parser.add_argument(
+        "--skip-ablations",
+        action="store_true",
+        help="Generate only non-ablation paper figures.",
+    )
     args = parser.parse_args()
 
-    outputs = plot_all(args.root, output_dir=args.output_dir, formats=args.formats, dpi=args.dpi)
+    outputs = plot_all(
+        args.root,
+        output_dir=args.output_dir,
+        formats=args.formats,
+        dpi=args.dpi,
+        skip_ablations=args.skip_ablations,
+    )
     for name, paths in outputs.items():
         for path in paths:
             print(f"{name}={path}")

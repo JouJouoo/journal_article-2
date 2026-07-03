@@ -107,18 +107,21 @@ def scale_raw_actions(raw_actions: np.ndarray, config: ExperimentConfig) -> Acti
     )
 
 
-def normalize_physical_actions(actions: ActionBatch, config: ExperimentConfig) -> np.ndarray:
-    m = config.market
-    s = config.storage
-    span = max(m.p2p_price_max - m.p2p_price_min, 1e-8)
-    out = np.zeros((actions.q_buy.shape[0], ACTION_DIM), dtype=np.float32)
-    out[:, 0] = actions.q_buy / max(m.max_buy_power, 1e-8)
-    out[:, 1] = actions.q_sell / max(m.max_sell_power, 1e-8)
-    out[:, 2] = (actions.price_buy - m.p2p_price_min) / span
-    out[:, 3] = (actions.price_sell - m.p2p_price_min) / span
-    out[:, 4] = actions.charge / max(s.max_charge_power, 1e-8)
-    out[:, 5] = actions.discharge / max(s.max_discharge_power, 1e-8)
-    return np.clip(out, 0.0, 1.0)
+def p2p_reference_price(
+    scenario: SyntheticScenario, config: ExperimentConfig, t: int
+) -> float:
+    idx = scenario.time_index(t)
+    reference = 0.5 * (
+        float(scenario.grid_buy_price[idx])
+        + float(scenario.grid_sell_price[idx])
+    )
+    return float(
+        np.clip(
+            reference,
+            float(config.market.p2p_price_min),
+            float(config.market.p2p_price_max),
+        )
+    )
 
 
 def double_auction(actions: ActionBatch) -> tuple[np.ndarray, np.ndarray]:

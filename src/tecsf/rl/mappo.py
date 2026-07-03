@@ -14,8 +14,14 @@ from tecsf.device import resolve_device
 from tecsf.env import EnergyCarbonEnv
 from tecsf.metrics import summarize_episode, write_json
 from tecsf.rl.buffer import RolloutBuffer
-from tecsf.rl.networks import CentralizedCritic, RecurrentGaussianActor
-from tecsf.variants import get_variant
+from tecsf.rl.networks import (
+    AdvantageGate,
+    CentralizedCritic,
+    ClipGate,
+    CreditAssignmentNetwork,
+    RecurrentGaussianActor,
+)
+from tecsf.variants import VariantSpec, get_variant
 
 
 @dataclass
@@ -50,6 +56,35 @@ def _compute_gae(
         next_value = values[step]
     returns = advantages + values
     return advantages.astype(np.float32), returns.astype(np.float32)
+
+
+def _compute_gae_per_agent(
+    rewards: np.ndarray,
+    dones: np.ndarray,
+    values: np.ndarray,
+    gamma: float,
+    gae_lambda: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    reward_arr = np.asarray(rewards, dtype=np.float32)
+    value_arr = np.asarray(values, dtype=np.float32)
+    if value_arr.ndim == 1:
+        value_arr = np.repeat(value_arr[:, None], reward_arr.shape[1], axis=1)
+    advantages = np.zeros_like(reward_arr, dtype=np.float32)
+    last_gae = np.zeros(reward_arr.shape[1], dtype=np.float32)
+    next_value = np.zeros(reward_arr.shape[1], dtype=np.float32)
+    for step in reversed(range(reward_arr.shape[0])):
+        nonterminal = 1.0 - float(dones[step])
+        delta = reward_arr[step] + gamma * next_value * nonterminal - value_arr[step]
+        last_gae = delta + gamma * gae_lambda * nonterminal * last_gae
+        advantages[step] = last_gae
+        next_value = value_arr[step]
+    returns = advantages + value_arr
+    return advantages.astype(np.float32), returns.astype(np.float32)
+
+
+def _normalize_advantage(values: np.ndarray) -> np.ndarray:
+    arr = np.asarray(values, dtype=np.float32)
+    return ((arr - arr.mean()) / (arr.std() + 1e-8)).astype(np.float32)
 
 
 def _collect_episode(
@@ -88,7 +123,7 @@ def _collect_episode(
             log_prob=log_prob_t.cpu().numpy(),
             reward=result.reward,
             done=result.terminated or result.truncated,
-            value=float(value_t.cpu().item()),
+            value=value_t.cpu().numpy(),
             info=result.info,
         )
         obs = result.observation
@@ -100,25 +135,57 @@ def _collect_episode(
 
 def _update_policy(
     config: ExperimentConfig,
+    variant_spec: VariantSpec,
     actor: RecurrentGaussianActor,
     critic: CentralizedCritic,
+    credit_net: CreditAssignmentNetwork,
+    advantage_gate: AdvantageGate,
+    clip_gate: ClipGate,
     actor_opt: torch.optim.Optimizer,
     critic_opt: torch.optim.Optimizer,
     rollout: RolloutBuffer,
     device: torch.device,
 ) -> dict[str, float]:
     data = rollout.arrays()
-    advantages, returns = _compute_gae(
-        data["rewards"],
-        data["dones"],
-        data["values"],
-        config.rl.gamma,
-        config.rl.gae_lambda,
-    )
-    adv_norm = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+    critic_values = data["values"]
+    if critic_values.ndim == 1:
+        critic_values = critic_values[:, None]
+    if variant_spec.use_dual_advantage:
+        adv_eco, returns_eco = _compute_gae_per_agent(
+            data["per_agent_reward_eco"],
+            data["dones"],
+            critic_values[:, 0],
+            config.rl.gamma,
+            config.rl.gae_lambda,
+        )
+        adv_coin, returns_coin = _compute_gae_per_agent(
+            data["per_agent_reward_coin"],
+            data["dones"],
+            critic_values[:, 1],
+            config.rl.gamma,
+            config.rl.gae_lambda,
+        )
+        adv_eco = _normalize_advantage(adv_eco)
+        adv_coin = _normalize_advantage(adv_coin)
+        critic_targets = np.stack(
+            [returns_eco.mean(axis=1), returns_coin.mean(axis=1)],
+            axis=1,
+        ).astype(np.float32)
+    else:
+        adv_total, returns_total = _compute_gae_per_agent(
+            data["per_agent_rewards"],
+            data["dones"],
+            critic_values[:, 0],
+            config.rl.gamma,
+            config.rl.gae_lambda,
+        )
+        adv_total = _normalize_advantage(adv_total)
+        critic_targets = np.zeros((returns_total.shape[0], 2), dtype=np.float32)
+        critic_targets[:, 0] = returns_total.mean(axis=1)
     t_steps, n_agents, obs_dim = data["observations"].shape
     action_dim = data["actions"].shape[-1]
 
+    obs_by_step = torch.as_tensor(data["observations"], device=device)
     obs = torch.as_tensor(data["observations"].reshape(t_steps * n_agents, obs_dim), device=device)
     hidden = torch.as_tensor(
         data["hidden_states"].reshape(t_steps * n_agents, -1), device=device
@@ -129,25 +196,76 @@ def _update_policy(
     old_log_probs = torch.as_tensor(
         data["log_probs"].reshape(t_steps * n_agents), device=device
     )
-    adv_actor = torch.as_tensor(
-        np.repeat(adv_norm[:, None], n_agents, axis=1).reshape(t_steps * n_agents),
-        device=device,
-    )
     states = torch.as_tensor(data["global_states"], device=device)
-    returns_t = torch.as_tensor(returns, device=device)
+    targets_t = torch.as_tensor(critic_targets, device=device)
+    asset_states = torch.as_tensor(data["asset_states"], device=device)
+    asset_flat = asset_states.reshape(t_steps * n_agents)
+    trade_relations = torch.as_tensor(data["trade_relations"], device=device)
+    adv_eco_t = (
+        torch.as_tensor(adv_eco, device=device)
+        if variant_spec.use_dual_advantage
+        else None
+    )
+    adv_coin_t = (
+        torch.as_tensor(adv_coin, device=device)
+        if variant_spec.use_dual_advantage
+        else None
+    )
+    adv_total_t = (
+        None
+        if variant_spec.use_dual_advantage
+        else torch.as_tensor(adv_total, device=device)
+    )
 
     actor_loss_value = 0.0
     critic_loss_value = 0.0
     entropy_value = 0.0
     for _ in range(config.rl.update_epochs):
+        if variant_spec.use_dual_advantage:
+            assert adv_eco_t is not None
+            assert adv_coin_t is not None
+            if variant_spec.use_credit_assignment:
+                agent_features = torch.cat(
+                    [obs_by_step, asset_states.unsqueeze(-1)],
+                    dim=-1,
+                )
+                credit_weights = credit_net(agent_features, trade_relations)
+                assigned_coin_adv = torch.sum(
+                    credit_weights * adv_coin_t.unsqueeze(1),
+                    dim=-1,
+                )
+            else:
+                assigned_coin_adv = adv_coin_t
+            if variant_spec.use_asset_utility:
+                gate_weights = advantage_gate(asset_states)
+                actor_advantage = (
+                    gate_weights[..., 0] * adv_eco_t
+                    + gate_weights[..., 1] * assigned_coin_adv
+                )
+            else:
+                actor_advantage = adv_eco_t
+            adv_actor = actor_advantage.reshape(t_steps * n_agents)
+        else:
+            assert adv_total_t is not None
+            adv_actor = adv_total_t.reshape(t_steps * n_agents)
+        adv_actor = (adv_actor - adv_actor.mean()) / (
+            adv_actor.std(unbiased=False) + 1e-8
+        )
+
         dist, _ = actor(obs, hidden)
         new_log_probs = dist.log_prob(actions).sum(dim=-1)
         entropy = dist.entropy().sum(dim=-1).mean()
         ratio = torch.exp(new_log_probs - old_log_probs)
+        if variant_spec.use_adaptive_clip:
+            clip_eps = clip_gate(asset_flat)
+        else:
+            clip_eps = torch.full_like(ratio, float(config.rl.clip_eps))
         unclipped = ratio * adv_actor
-        clipped = torch.clamp(
-            ratio, 1.0 - config.rl.clip_eps, 1.0 + config.rl.clip_eps
-        ) * adv_actor
+        clipped_ratio = torch.max(
+            torch.min(ratio, 1.0 + clip_eps),
+            1.0 - clip_eps,
+        )
+        clipped = clipped_ratio * adv_actor
         actor_loss = -torch.min(unclipped, clipped).mean() - config.rl.entropy_coef * entropy
 
         actor_opt.zero_grad()
@@ -156,7 +274,11 @@ def _update_policy(
         actor_opt.step()
 
         values = critic(states)
-        critic_loss = config.rl.value_coef * torch.mean((values - returns_t) ** 2)
+        if variant_spec.use_dual_advantage:
+            value_error = (values - targets_t) ** 2
+        else:
+            value_error = (values[:, 0] - targets_t[:, 0]) ** 2
+        critic_loss = config.rl.value_coef * torch.mean(value_error)
         critic_opt.zero_grad()
         critic_loss.backward()
         nn.utils.clip_grad_norm_(critic.parameters(), config.rl.max_grad_norm)
@@ -198,7 +320,23 @@ def train(
         use_recurrence=variant_spec.use_recurrence,
     ).to(device_obj)
     critic = CentralizedCritic(env.global_state_dim, cfg.rl.hidden_dim).to(device_obj)
-    actor_opt = torch.optim.Adam(actor.parameters(), lr=cfg.rl.actor_lr)
+    credit_net = CreditAssignmentNetwork(
+        agent_feature_dim=env.observation_dim + 1,
+        hidden_dim=cfg.rl.hidden_dim,
+    ).to(device_obj)
+    advantage_gate = AdvantageGate(cfg.rl.hidden_dim).to(device_obj)
+    clip_gate = ClipGate(
+        cfg.rl.hidden_dim,
+        clip_min=cfg.rl.clip_eps_min,
+        clip_max=cfg.rl.clip_eps_max,
+    ).to(device_obj)
+    actor_params = (
+        list(actor.parameters())
+        + list(credit_net.parameters())
+        + list(advantage_gate.parameters())
+        + list(clip_gate.parameters())
+    )
+    actor_opt = torch.optim.Adam(actor_params, lr=cfg.rl.actor_lr)
     critic_opt = torch.optim.Adam(critic.parameters(), lr=cfg.rl.critic_lr)
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
@@ -214,7 +352,19 @@ def train(
             use_heuristic_policy=not variant_spec.learning,
         )
         update_metrics = (
-            _update_policy(cfg, actor, critic, actor_opt, critic_opt, rollout, device_obj)
+            _update_policy(
+                cfg,
+                variant_spec,
+                actor,
+                critic,
+                credit_net,
+                advantage_gate,
+                clip_gate,
+                actor_opt,
+                critic_opt,
+                rollout,
+                device_obj,
+            )
             if variant_spec.learning
             else {"actor_loss": 0.0, "critic_loss": 0.0, "entropy": 0.0}
         )
@@ -230,6 +380,9 @@ def train(
             "config": asdict(cfg),
             "actor_state_dict": actor.state_dict(),
             "critic_state_dict": critic.state_dict(),
+            "credit_assignment_state_dict": credit_net.state_dict(),
+            "advantage_gate_state_dict": advantage_gate.state_dict(),
+            "clip_gate_state_dict": clip_gate.state_dict(),
             "episode_metrics": episode_metrics,
         },
         checkpoint_path,

@@ -2,16 +2,23 @@ from __future__ import annotations
 
 import numpy as np
 
-from tecsf.config import ExperimentConfig, NetworkConfig, ScenarioConfig
-from tecsf.env import EnergyCarbonEnv
+from tecsf.config import ExperimentConfig, ScenarioConfig
+from tecsf.env import (
+    ASSET_BALANCE_OBS_INDEX,
+    P2P_REF_PRICE_OBS_INDEX,
+    EnergyCarbonEnv,
+)
 
 
 def test_env_step_shapes_and_finite_rewards():
     config = ExperimentConfig(scenario=ScenarioConfig(num_agents=4, num_nodes=3, horizon=3))
     env = EnergyCarbonEnv(config, variant="tecsf")
     obs, global_state, _ = env.reset(seed=9)
+    assert env.observation_dim == 7
     assert obs.shape == (4, env.observation_dim)
     assert global_state.shape == (env.global_state_dim,)
+    assert np.all(obs[:, P2P_REF_PRICE_OBS_INDEX] > 0.0)
+    assert np.allclose(obs[:, ASSET_BALANCE_OBS_INDEX], 0.0)
     result = env.step(np.zeros((4, env.action_dim), dtype=np.float32))
     assert result.observation.shape == (4, env.observation_dim)
     assert result.global_state.shape == (env.global_state_dim,)
@@ -23,6 +30,23 @@ def test_env_step_shapes_and_finite_rewards():
     assert "system_social_cost" in result.info
     assert "participant_payment_cost" in result.info
     assert "action_bound_deviation" in result.info
+    assert "agent_reward_eco" in result.info
+    assert "agent_reward_coin" in result.info
+    assert "agent_utility_stock" in result.info
+    assert "agent_utility_increment" in result.info
+    assert "agent_lccoins_balance" in result.info
+    assert "consensus_confirmed" in result.info
+    assert "p2p_matrix" in result.info
+
+
+def test_standard_mappo_does_not_observe_lccoins_asset_state():
+    config = ExperimentConfig(scenario=ScenarioConfig(num_agents=4, num_nodes=3, horizon=3))
+    env = EnergyCarbonEnv(config, variant="mappo")
+    obs, _, _ = env.reset(seed=9)
+    result = env.step(np.zeros((4, env.action_dim), dtype=np.float32))
+    assert np.allclose(obs[:, ASSET_BALANCE_OBS_INDEX], 0.0)
+    assert np.allclose(result.observation[:, ASSET_BALANCE_OBS_INDEX], 0.0)
+    assert result.info["lccoins"] == 0.0
 
 
 def test_heuristic_action_is_valid():
@@ -69,21 +93,17 @@ def test_preset_low_carbon_variant_uses_internal_low_carbon_reward():
     assert result.info["lccoins"] == 0.0
 
 
-def test_lccoins_reward_is_clipped_and_adaptive_weight_reacts_to_risk():
-    config = ExperimentConfig(
-        scenario=ScenarioConfig(num_agents=8, num_nodes=5, horizon=24),
-        network=NetworkConfig(default_line_capacity=0.5),
-    )
-    config.clearing.enable_safety_shield = False
-    config.lccoins.kappa = 0.4
-    config.lccoins.kappa_max = 0.4
-    config.lccoins.reward_clip = 0.01
+def test_tecsf_coin_reward_uses_crra_stock_and_increment_utility():
+    config = ExperimentConfig(scenario=ScenarioConfig(num_agents=4, num_nodes=3, horizon=3))
     env = EnergyCarbonEnv(config, variant="tecsf")
-    env.reset(seed=7)
-    action = np.ones((env.num_agents, env.action_dim), dtype=np.float32)
+    env.reset(seed=12)
 
-    result = env.step(action)
+    result = env.step(np.zeros((env.num_agents, env.action_dim), dtype=np.float32))
 
-    assert abs(result.info["lccoins_reward_clipped"]) <= env.num_agents * 0.01 + 1e-6
-    assert env.lccoins_reward_weight <= config.lccoins.kappa
-    assert "feasible" in result.info
+    expected = (
+        config.lccoins.stock_utility_weight
+        * np.asarray(result.info["agent_utility_stock"], dtype=np.float32)
+        + config.lccoins.increment_utility_weight
+        * np.asarray(result.info["agent_utility_increment"], dtype=np.float32)
+    )
+    assert np.allclose(result.info["agent_reward_coin"], expected)

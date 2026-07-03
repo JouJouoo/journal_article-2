@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from tecsf.carbon import compute_carbon_result
 from tecsf.config import ExperimentConfig, NetworkConfig, ScenarioConfig
 from tecsf.data import generate_synthetic_scenario
 from tecsf.market import ActionBatch, clear_market, double_auction, scale_raw_actions
@@ -59,6 +60,60 @@ def test_clearing_outputs_carbon_accounts_and_hash():
     assert np.all(package.carbon.a_buy >= -1e-7)
     assert np.all(package.carbon.c_sell >= -1e-7)
     assert set(package.violations) == {"voltage", "line", "soc", "trade"}
+
+
+def test_grid_exchange_is_clearing_fallback_not_actor_action():
+    config = ExperimentConfig(scenario=ScenarioConfig(num_agents=3, num_nodes=3, horizon=4))
+    scenario = generate_synthetic_scenario(config, seed=123)
+    raw = np.zeros((3, 6), dtype=np.float32)
+    actions = scale_raw_actions(raw, config)
+
+    assert not hasattr(actions, "grid_buy")
+    assert not hasattr(actions, "grid_sell")
+
+    package = clear_market(
+        scenario=scenario,
+        config=config,
+        t=0,
+        soc=np.full(3, config.storage.init_soc, dtype=np.float32),
+        actions=actions,
+    )
+    p2p_sold = package.p2p_power.sum(axis=1)
+    p2p_bought = package.p2p_power.sum(axis=0)
+    residual = (
+        package.effective_load
+        + package.charge
+        + p2p_sold
+        - package.effective_pv
+        - package.discharge
+        - p2p_bought
+    )
+
+    assert np.allclose(package.grid_buy, np.maximum(residual, 0.0))
+    assert np.allclose(package.grid_sell, np.maximum(-residual, 0.0))
+
+
+def test_lccoins_clean_energy_excludes_external_grid_export():
+    config = ExperimentConfig(scenario=ScenarioConfig(num_agents=3, num_nodes=3, horizon=4))
+    scenario = generate_synthetic_scenario(config, seed=123)
+    load = np.asarray([1.0, 0.5, 0.25], dtype=np.float32)
+    pv = np.asarray([5.0, 5.0, 5.0], dtype=np.float32)
+    zeros = np.zeros(3, dtype=np.float32)
+    grid_sell = np.asarray([4.0, 4.5, 4.75], dtype=np.float32)
+
+    carbon = compute_carbon_result(
+        scenario=scenario,
+        config=config,
+        t=0,
+        load=load,
+        pv=pv,
+        charge=zeros,
+        p2p_sell=zeros,
+        grid_buy=zeros,
+        grid_sell=grid_sell,
+    )
+
+    assert np.allclose(carbon.q_lc, load * scenario.delta_t)
 
 
 def test_default_no_trade_no_storage_scenario_is_feasible():

@@ -23,7 +23,7 @@ def _slug(value: float) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run LCCoins reward-weight sensitivity experiments."
+        description="Run LCCoins asset-aware sensitivity experiments."
     )
     parser.add_argument("--config", default="configs/default.yaml")
     parser.add_argument("--output-dir", default="outputs/lccoins_sensitivity")
@@ -31,28 +31,81 @@ def main() -> None:
     parser.add_argument("--eval-episodes", type=int, default=20)
     parser.add_argument("--eval-seed-start", type=int, default=120000)
     parser.add_argument("--seeds", nargs="+", type=int, default=[7, 42, 100])
-    parser.add_argument("--variants", nargs="+", choices=sorted(VARIANTS), default=["tecsf", "no_lccoins", "no_feedback", "preset_low_carbon"])
-    parser.add_argument("--kappa-values", nargs="+", type=float, default=[0.0, 0.05, 0.1, 0.2, 0.5])
-    parser.add_argument("--alpha-q-values", nargs="+", type=float, default=[1.0])
-    parser.add_argument("--alpha-offset-values", nargs="+", type=float, default=[0.5])
+    parser.add_argument(
+        "--variants",
+        nargs="+",
+        choices=sorted(VARIANTS),
+        default=["tecsf", "no_lccoins", "preset_low_carbon"],
+    )
+    parser.add_argument(
+        "--asset-utility-weights",
+        nargs="+",
+        type=float,
+        default=None,
+        help="Set stock and increment utility weights to the same values.",
+    )
+    parser.add_argument("--stock-utility-weights", nargs="+", type=float, default=None)
+    parser.add_argument("--increment-utility-weights", nargs="+", type=float, default=None)
+    parser.add_argument("--clean-energy-weights", nargs="+", type=float, default=None)
+    parser.add_argument("--carbon-reduction-weights", nargs="+", type=float, default=None)
+    parser.add_argument("--minting-coefficients", nargs="+", type=float, default=None)
     parser.add_argument("--device", default="auto", help="auto, cpu, cuda, or cuda:<index>")
     parser.add_argument("--jobs", type=int, default=1)
     args = parser.parse_args()
 
     base_config = load_config(args.config)
+    if args.asset_utility_weights is not None:
+        asset_weight_pairs = [(value, value) for value in args.asset_utility_weights]
+    else:
+        stock_weights = (
+            args.stock_utility_weights
+            if args.stock_utility_weights is not None
+            else [base_config.lccoins.stock_utility_weight]
+        )
+        increment_weights = (
+            args.increment_utility_weights
+            if args.increment_utility_weights is not None
+            else [base_config.lccoins.increment_utility_weight]
+        )
+        asset_weight_pairs = list(product(stock_weights, increment_weights))
+    clean_energy_weights = (
+        args.clean_energy_weights
+        if args.clean_energy_weights is not None
+        else [base_config.lccoins.clean_energy_weight]
+    )
+    carbon_reduction_weights = (
+        args.carbon_reduction_weights
+        if args.carbon_reduction_weights is not None
+        else [base_config.lccoins.carbon_reduction_weight]
+    )
+    minting_coefficients = (
+        args.minting_coefficients
+        if args.minting_coefficients is not None
+        else [base_config.lccoins.minting_coefficient]
+    )
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     jobs = []
     configs = {}
     job_index = 0
-    for kappa, alpha_q, alpha_offset in product(
-        args.kappa_values, args.alpha_q_values, args.alpha_offset_values
+    for (stock_weight, increment_weight), clean_weight, carbon_weight, minting_coeff in product(
+        asset_weight_pairs,
+        clean_energy_weights,
+        carbon_reduction_weights,
+        minting_coefficients,
     ):
         cfg = copy.deepcopy(base_config)
-        cfg.lccoins.kappa = kappa
-        cfg.lccoins.alpha_q = alpha_q
-        cfg.lccoins.alpha_offset = alpha_offset
-        label = f"kappa_{_slug(kappa)}__aq_{_slug(alpha_q)}__ao_{_slug(alpha_offset)}"
+        cfg.lccoins.stock_utility_weight = stock_weight
+        cfg.lccoins.increment_utility_weight = increment_weight
+        cfg.lccoins.clean_energy_weight = clean_weight
+        cfg.lccoins.carbon_reduction_weight = carbon_weight
+        cfg.lccoins.minting_coefficient = minting_coeff
+        label = (
+            f"stock_{_slug(stock_weight)}__inc_{_slug(increment_weight)}"
+            f"__ce_{_slug(clean_weight)}__cr_{_slug(carbon_weight)}"
+        )
+        if abs(float(minting_coeff) - 1.0) > 1e-12:
+            label += f"__mint_{_slug(minting_coeff)}"
         configs[label] = asdict(cfg)
         for variant in args.variants:
             for seed in args.seeds:

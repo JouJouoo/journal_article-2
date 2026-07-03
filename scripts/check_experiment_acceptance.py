@@ -22,6 +22,16 @@ def _find_group(summary: dict[str, Any], label: str, variant: str) -> dict[str, 
     return None
 
 
+def _find_any_group(
+    summary: dict[str, Any], labels: list[str], variant: str
+) -> dict[str, Any] | None:
+    for label in labels:
+        row = _find_group(summary, label, variant)
+        if row:
+            return row
+    return None
+
+
 def _gate(row: dict[str, Any], min_success: float, max_violation: float) -> bool:
     return (
         float(row.get("eval_settlement_success_rate_mean", 0.0)) >= min_success
@@ -57,12 +67,17 @@ def main() -> None:
     parser.add_argument("output_dir")
     parser.add_argument("--min-success", type=float, default=0.95)
     parser.add_argument("--max-violation", type=float, default=0.1)
-    parser.add_argument("--min-lccoins-kappa01-reward", type=float, default=-1.0)
+    parser.add_argument("--min-lccoins-asset01-reward", type=float, default=-1.0)
     parser.add_argument(
         "--benchmark-cases",
         nargs="+",
         default=None,
         help="Benchmark suites expected under output_dir as benchmark_<case>. Defaults to discovered benchmark_* directories.",
+    )
+    parser.add_argument(
+        "--skip-ablations",
+        action="store_true",
+        help="Do not require LCCoins/component ablation suites under output_dir.",
     )
     args = parser.parse_args()
 
@@ -79,7 +94,9 @@ def main() -> None:
     )
 
     formal = _check_file(root / "formal_multiseed" / "summary.json", failures)
-    lccoins = _check_file(root / "lccoins_sensitivity" / "summary.json", failures)
+    lccoins = None
+    if not args.skip_ablations:
+        lccoins = _check_file(root / "lccoins_sensitivity" / "summary.json", failures)
     network = _check_file(root / "network_stress" / "summary.json", failures)
     system = _check_file(root / "system_stress" / "summary.json", failures)
     scalability = _check_file(root / "scalability" / "summary.json", failures)
@@ -92,7 +109,7 @@ def main() -> None:
     if formal:
         row = _find_group(formal, "", "tecsf")
         if not row or not _gate(row, args.min_success, args.max_violation):
-            failures.append("formal_multiseed TECSF does not pass feasibility gate")
+            failures.append("formal_multiseed LC-MAPPO does not pass feasibility gate")
         elif row:
             for metric in [
                 "eval_q_lc_mean",
@@ -106,13 +123,17 @@ def main() -> None:
                 "eval_participant_payment_cost_mean",
                 "eval_p2p_transfer_payment_mean",
             ]:
-                _require_numeric(row, metric, failures, "formal_multiseed TECSF")
+                _require_numeric(row, metric, failures, "formal_multiseed LC-MAPPO")
     if lccoins:
-        row = _find_group(lccoins, "kappa_0p1__aq_1__ao_0p5", "tecsf")
+        row = _find_any_group(
+            lccoins,
+            ["stock_0p1__inc_0p1__ce_1__cr_1", "stock_0p1__inc_0p1__ce_1__cr_0p5"],
+            "tecsf",
+        )
         if not row or not _gate(row, args.min_success, args.max_violation):
-            failures.append("lccoins kappa=0.1 TECSF does not pass feasibility gate")
-        elif float(row.get("eval_mean_reward_mean", -999.0)) < args.min_lccoins_kappa01_reward:
-            failures.append("lccoins kappa=0.1 TECSF reward still indicates collapse")
+            failures.append("lccoins asset utility weight=0.1 LC-MAPPO does not pass feasibility gate")
+        elif float(row.get("eval_mean_reward_mean", -999.0)) < args.min_lccoins_asset01_reward:
+            failures.append("lccoins asset utility weight=0.1 LC-MAPPO reward still indicates collapse")
         elif row:
             for metric in [
                 "eval_q_lc_mean",
@@ -122,22 +143,22 @@ def main() -> None:
                 "eval_lccoins_candidate_mean",
                 "eval_agent_lccoins_candidate_corr_mean",
             ]:
-                _require_numeric(row, metric, failures, "lccoins kappa=0.1 TECSF")
+                _require_numeric(row, metric, failures, "lccoins asset utility weight=0.1 LC-MAPPO")
     if network:
         for label in ["line_0p5__trade_1", "line_0p5__trade_1p3"]:
             row = _find_group(network, label, "tecsf")
             if not row or not _gate(row, args.min_success, args.max_violation):
-                failures.append(f"network_stress {label} TECSF does not pass feasibility gate")
+                failures.append(f"network_stress {label} LC-MAPPO does not pass feasibility gate")
     if system:
         for row in system.get("by_setting_variant", []):
             if row.get("variant") == "tecsf" and not _gate(row, args.min_success, args.max_violation):
                 failures.append(
-                    f"system_stress {row.get('label', '<missing>')} TECSF does not pass feasibility gate"
+                    f"system_stress {row.get('label', '<missing>')} LC-MAPPO does not pass feasibility gate"
                 )
     if scalability:
         row = _find_group(scalability, "agents_16__nodes_9", "tecsf")
         if not row or not _gate(row, args.min_success, args.max_violation):
-            failures.append("scalability agents_16__nodes_9 TECSF does not pass feasibility gate")
+            failures.append("scalability agents_16__nodes_9 LC-MAPPO does not pass feasibility gate")
     if settlement:
         if not settlement.get("all_passed", False):
             failures.append("settlement_stress did not pass all cases")
@@ -146,16 +167,13 @@ def main() -> None:
             continue
         row = _find_group(summary, "", "tecsf")
         if not row or not _gate(row, args.min_success, args.max_violation):
-            failures.append(f"benchmark_{case} TECSF does not pass feasibility gate")
+            failures.append(f"benchmark_{case} LC-MAPPO does not pass feasibility gate")
 
-    for suite in [
-        "formal_multiseed",
-        "lccoins_sensitivity",
-        "network_stress",
-        "system_stress",
-        "scalability",
-        *[f"benchmark_{case}" for case in benchmark_cases],
-    ]:
+    expected_suites = ["formal_multiseed", "network_stress", "system_stress", "scalability"]
+    if not args.skip_ablations:
+        expected_suites.insert(1, "lccoins_sensitivity")
+    expected_suites.extend(f"benchmark_{case}" for case in benchmark_cases)
+    for suite in expected_suites:
         _require_post_outputs(root, suite, failures)
     if not (root / "settlement_stress" / "figures").exists():
         failures.append("missing figures output for settlement_stress")

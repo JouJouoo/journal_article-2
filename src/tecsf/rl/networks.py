@@ -53,15 +53,73 @@ class RecurrentGaussianActor(nn.Module):
 
 
 class CentralizedCritic(nn.Module):
-    def __init__(self, global_state_dim: int, hidden_dim: int):
+    def __init__(self, global_state_dim: int, hidden_dim: int, value_heads: int = 2):
         super().__init__()
         self.net = nn.Sequential(
             layer_init(nn.Linear(global_state_dim, hidden_dim)),
             nn.Tanh(),
             layer_init(nn.Linear(hidden_dim, hidden_dim)),
             nn.Tanh(),
-            layer_init(nn.Linear(hidden_dim, 1), std=1.0),
+            layer_init(nn.Linear(hidden_dim, value_heads), std=1.0),
         )
 
     def forward(self, global_state: torch.Tensor) -> torch.Tensor:
-        return self.net(global_state).squeeze(-1)
+        return self.net(global_state)
+
+
+class CreditAssignmentNetwork(nn.Module):
+    def __init__(self, agent_feature_dim: int, hidden_dim: int):
+        super().__init__()
+        pair_dim = 2 * agent_feature_dim + 1
+        self.net = nn.Sequential(
+            layer_init(nn.Linear(pair_dim, hidden_dim)),
+            nn.Tanh(),
+            layer_init(nn.Linear(hidden_dim, hidden_dim)),
+            nn.Tanh(),
+            layer_init(nn.Linear(hidden_dim, 1), std=0.01),
+        )
+
+    def forward(
+        self,
+        agent_features: torch.Tensor,
+        trade_relation: torch.Tensor,
+    ) -> torch.Tensor:
+        t_steps, n_agents, feature_dim = agent_features.shape
+        source = agent_features.unsqueeze(2).expand(t_steps, n_agents, n_agents, feature_dim)
+        target = agent_features.unsqueeze(1).expand(t_steps, n_agents, n_agents, feature_dim)
+        edge = trade_relation.unsqueeze(-1)
+        pair_features = torch.cat([source, target, edge], dim=-1)
+        scores = self.net(pair_features).squeeze(-1)
+        return torch.softmax(scores, dim=-1)
+
+
+class AdvantageGate(nn.Module):
+    def __init__(self, hidden_dim: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            layer_init(nn.Linear(1, hidden_dim)),
+            nn.Tanh(),
+            layer_init(nn.Linear(hidden_dim, 2), std=0.01),
+        )
+
+    def forward(self, asset_state: torch.Tensor) -> torch.Tensor:
+        return torch.softmax(self.net(asset_state.unsqueeze(-1)), dim=-1)
+
+
+class ClipGate(nn.Module):
+    def __init__(self, hidden_dim: int, clip_min: float, clip_max: float):
+        super().__init__()
+        self.clip_min = float(clip_min)
+        self.clip_max = float(clip_max)
+        self.net = nn.Sequential(
+            layer_init(nn.Linear(1, hidden_dim)),
+            nn.Tanh(),
+            layer_init(nn.Linear(hidden_dim, 1), std=0.01),
+        )
+
+    def forward(self, asset_state: torch.Tensor) -> torch.Tensor:
+        span = max(self.clip_max - self.clip_min, 0.0)
+        value = self.clip_min + span * torch.sigmoid(
+            self.net(asset_state.unsqueeze(-1)).squeeze(-1)
+        )
+        return value

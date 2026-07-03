@@ -6,6 +6,7 @@ from tecsf.chain import REJECTED, REVERTED, SETTLED, SettlementEngine, Simulated
 from tecsf.config import ExperimentConfig, ScenarioConfig
 from tecsf.data import generate_synthetic_scenario
 from tecsf.market import ActionBatch, clear_market
+from tecsf.utils import stable_hash
 
 
 def _package():
@@ -46,6 +47,56 @@ def test_settlement_mints_once_and_reverts_duplicate():
     duplicate = engine.settle(package)
     assert duplicate.state == REVERTED
     assert np.allclose(engine.energy_balances, balances)
+
+
+def test_lccoins_candidate_uses_paper_contribution_formula():
+    config, package = _package()
+    expected_contribution = (
+        config.lccoins.clean_energy_weight * package.carbon.q_lc
+        + config.lccoins.carbon_reduction_weight * package.carbon.carbon_reduction
+    )
+    expected_mint = config.lccoins.minting_coefficient * expected_contribution
+    assert np.allclose(package.carbon.low_carbon_contribution, expected_contribution)
+    assert np.allclose(package.carbon.lccoins_candidate, expected_mint)
+
+
+def test_lccoins_consensus_threshold_controls_minting():
+    config, package = _package()
+    config.lccoins.validator_count = 3
+    config.lccoins.consensus_threshold = 4
+    engine = SettlementEngine(config, num_agents=3)
+
+    record = engine.settle(package)
+
+    assert record.state == SETTLED
+    assert record.consensus_threshold == 4
+    assert not any(record.consensus_confirmed.values())
+    assert sum(record.lccoins.values()) == 0.0
+    assert np.allclose(engine.lccoins_balances, 0.0)
+
+
+def test_lccoins_consensus_rejects_inconsistent_carbon_reduction():
+    config, package = _package()
+    agent = 0
+    package.carbon.carbon_reduction[agent] += 1.0
+    package.carbon.low_carbon_contribution[agent] = (
+        config.lccoins.clean_energy_weight * package.carbon.q_lc[agent]
+        + config.lccoins.carbon_reduction_weight
+        * package.carbon.carbon_reduction[agent]
+    )
+    package.carbon.lccoins_candidate[agent] = (
+        config.lccoins.minting_coefficient
+        * package.carbon.low_carbon_contribution[agent]
+    )
+    package.package_hash = stable_hash(package.payload(include_hash=False))
+    engine = SettlementEngine(config, num_agents=3)
+
+    record = engine.settle(package)
+
+    assert record.state == SETTLED
+    assert record.consensus_confirmed[agent] is False
+    assert agent not in record.lccoins
+    assert engine.lccoins_balances[agent] == 0.0
 
 
 def test_simulated_chain_produces_blocks_and_receipts(tmp_path):
