@@ -10,7 +10,7 @@ from tecsf.rl.mappo import evaluate_policy
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluate a TECSF checkpoint.")
+    parser = argparse.ArgumentParser(description="评估检查点策略.")
     parser.add_argument("checkpoint")
     parser.add_argument("--config", default="configs/default.yaml")
     parser.add_argument("--episodes", type=int, default=3)

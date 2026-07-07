@@ -162,7 +162,7 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run paired statistical comparisons for TECSF experiment summaries."
+        description="对实验结果进行配对统计比较."
     )
     parser.add_argument("summary", help="summary.json produced by an experiment suite.")
     parser.add_argument("--baseline", default="tecsf")

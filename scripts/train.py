@@ -9,7 +9,7 @@ from tecsf.rl.mappo import train
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train a TECSF variant.")
+    parser = argparse.ArgumentParser(description="训练低碳资产感知 MAPPO 变体.")
     parser.add_argument("--config", default="configs/default.yaml")
     parser.add_argument("--variant", default="tecsf")
     parser.add_argument("--episodes", type=int, default=None)

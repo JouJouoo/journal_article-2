@@ -90,13 +90,13 @@ def _resolve_current_limits(
     if locked is not None and locked.line_current_limit_a.shape == (branch_count,):
         return (
             locked.line_current_limit_a.astype(np.float32),
-            "Line current limits are TECSF benchmark constraints because the source case "
+            "Line current limits are benchmark constraints because the source case "
             "does not provide complete thermal ratings.",
         )
 
     return (
         np.full(branch_count, 400.0, dtype=np.float32),
-        "Line current limits use the TECSF fallback value because no source ratings exist.",
+        "Line current limits use the fallback value because no source ratings exist.",
     )
 
 

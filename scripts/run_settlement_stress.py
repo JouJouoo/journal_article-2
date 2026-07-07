@@ -9,7 +9,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from tecsf.chain import REJECTED, REVERTED, SETTLED, SettlementEngine, SimulatedTECSChain
+from tecsf.chain import REJECTED, REVERTED, SETTLED, ConsortiumChainLedger, SettlementEngine
 from tecsf.config import ExperimentConfig, ScenarioConfig
 from tecsf.data import generate_synthetic_scenario
 from tecsf.market import ActionBatch, clear_market
@@ -101,7 +101,7 @@ def _case_rows(seed: int) -> list[dict]:
     )
 
     config, package = _package(seed + 30_000)
-    chain = SimulatedTECSChain(config, num_agents=3)
+    chain = ConsortiumChainLedger(config, num_agents=3)
     energy_before = chain.energy_balances.copy()
     carbon_before = chain.carbon_balances.copy()
     lccoins_before = chain.lccoins_balances.copy()
@@ -140,7 +140,7 @@ def _case_rows(seed: int) -> list[dict]:
     )
 
     config, package = _package(seed + 50_000)
-    chain = SimulatedTECSChain(config, num_agents=3)
+    chain = ConsortiumChainLedger(config, num_agents=3)
     record = chain.settle(package)
     ledger = chain.ledger_payload()
     block = ledger["blocks"][-1]
@@ -170,7 +170,7 @@ def _case_rows(seed: int) -> list[dict]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Stress-test TECS-Chain settlement rejection, rollback, minting, and audit invariants."
+        description="压力测试联盟链结算拒绝、回滚、铸造和审计不变量."
     )
     parser.add_argument("--output-dir", default="outputs/settlement_stress")
     parser.add_argument("--seeds", nargs="+", type=int, default=[7, 42, 100, 2026, 3407])

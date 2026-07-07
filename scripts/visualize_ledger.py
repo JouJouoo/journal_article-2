@@ -81,7 +81,7 @@ def _plot_chain_overview(rows: list[dict], output: Path) -> None:
     gs = fig.add_gridspec(3, 1, height_ratios=[0.8 * lane_count + 0.2, 1.0, 1.2], hspace=0.45)
 
     ax_chain = fig.add_subplot(gs[0, 0])
-    ax_chain.set_title("A. Simulated TECS-Chain block linkage", loc="left", fontweight="bold")
+    ax_chain.set_title("A. 联盟链区块链接", loc="left", fontweight="bold")
     ax_chain.set_xlim(-0.85, display_width + 0.1)
     ax_chain.set_ylim(-0.2, lane_count)
     ax_chain.axis("off")
@@ -261,7 +261,7 @@ def _write_html_report(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>TECS-Chain ledger report</title>
+  <title>联盟链账本报告</title>
   <style>
     body {{ font-family: Arial, sans-serif; margin: 28px; color: #222; }}
     h1, h2 {{ margin-bottom: 0.3rem; }}
@@ -276,7 +276,7 @@ def _write_html_report(
   </style>
 </head>
 <body>
-  <h1>TECS-Chain ledger report</h1>
+  <h1>联盟链账本报告</h1>
   <p>Source ledger: <code>{html.escape(str(ledger_path))}</code></p>
   <div class="summary">
     <div class="card"><div>Blocks</div><div class="value">{len(rows)}</div></div>
@@ -311,7 +311,7 @@ def _write_html_report(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Visualize a simulated TECS-Chain ledger JSON.")
+    parser = argparse.ArgumentParser(description="可视化联盟链账本 JSON.")
     parser.add_argument("ledger", help="Path to ledger_ep*.json exported by scripts/export_ledger.py.")
     parser.add_argument("--output-dir", default=None)
     args = parser.parse_args()

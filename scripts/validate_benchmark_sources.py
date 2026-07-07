@@ -49,7 +49,7 @@ def _validate_case(case_name: str, case69_m: str | None) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Validate locked TECSF IEEE benchmark tables against local authoritative "
+            "Validate locked IEEE benchmark tables against local authoritative "
             "pandapower/MATPOWER sources."
         )
     )

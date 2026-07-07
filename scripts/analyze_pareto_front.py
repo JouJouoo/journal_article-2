@@ -117,7 +117,7 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Analyze feasible-set Pareto efficiency for TECSF experiment runs."
+        description="分析可行集 Pareto 效率."
     )
     parser.add_argument("summary", help="summary.json produced by an experiment suite.")
     parser.add_argument("--min-success", type=float, default=0.95)

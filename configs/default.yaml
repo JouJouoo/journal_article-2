@@ -77,17 +77,30 @@ clearing:
 rl:
   hidden_dim: 64
   recurrent_dim: 64
-  actor_lr: 0.0003
+  actor_lr: 0.00005
   critic_lr: 0.001
   gamma: 0.98
   gae_lambda: 0.95
   clip_eps: 0.2
   clip_eps_min: 0.1
   clip_eps_max: 0.3
-  entropy_coef: 0.01
+  entropy_coef: 0.0
+  log_std_init: -3.0
+  log_std_min: -4.0
+  log_std_max: -2.5
+  action_prior_coef: 2.0
+  action_prior_decay_episodes: 0
+  lr_decay_episodes: 5000
+  min_lr_factor: 0.0
+  target_kl: 0.02
+  best_checkpoint_window: 500
+  early_stop_warmup_episodes: 4000
+  early_stop_patience: 1000
+  early_stop_min_delta: 0.0005
+  restore_best_on_plateau: true
   value_coef: 0.5
   max_grad_norm: 0.5
-  update_epochs: 3
+  update_epochs: 1
   batch_size: 128
   episodes: 20
   seed: 7

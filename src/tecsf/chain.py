@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import enum
 import json
 import math
 from dataclasses import dataclass, field
@@ -21,6 +22,32 @@ REJECTED = "Rejected"
 REVERTED = "Reverted"
 
 
+class ValidatorRole(enum.Enum):
+    """验证节点角色，对应论文 2.2 节联盟链验证节点集合的组成。"""
+
+    CLEARING = "market_clearing"       # 市场清算节点
+    METERING = "metering"              # 计量数据节点
+    CARBON = "carbon_accounting"       # 碳核算节点
+    LEDGER = "ledger_maintenance"      # 账本维护节点
+
+
+@dataclass(frozen=True)
+class ValidatorNode:
+    """联盟链验证节点，具有唯一标识和角色。"""
+
+    node_id: str
+    role: ValidatorRole
+
+
+def _default_validator_set(count: int) -> list[ValidatorNode]:
+    """按论文描述构造验证节点集合，角色循环分配。"""
+    roles = list(ValidatorRole)
+    return [
+        ValidatorNode(node_id=f"validator-{i}", role=roles[i % len(roles)])
+        for i in range(max(count, 1))
+    ]
+
+
 @dataclass
 class SettlementRecord:
     record_id: str
@@ -34,6 +61,7 @@ class SettlementRecord:
     consensus_confirmed: dict[int, bool] = field(default_factory=dict)
     consensus_votes: dict[int, int] = field(default_factory=dict)
     consensus_threshold: int = 0
+    validator_confirmations: dict[int, dict[str, bool]] = field(default_factory=dict)
 
     @property
     def settled(self) -> bool:
@@ -42,7 +70,7 @@ class SettlementRecord:
 
 @dataclass
 class BlockchainTransaction:
-    """Settlement transaction submitted to the simulated TECS-Chain ledger."""
+    """结算交易，提交至联盟链账本."""
 
     tx_id: str
     epoch: int
@@ -72,7 +100,7 @@ class BlockchainReceipt:
 
 @dataclass
 class Block:
-    """Minimal block structure for local TECS-Chain simulation."""
+    """联盟链区块结构."""
 
     height: int
     timestamp: float
@@ -86,7 +114,7 @@ class Block:
 
 
 class SettlementEngine:
-    """Local TECS-Chain simulator with atomic settlement semantics."""
+    """联盟链结算智能合约，实现原子结算语义."""
 
     def __init__(self, config: ExperimentConfig, num_agents: int):
         self.config = config
@@ -96,6 +124,9 @@ class SettlementEngine:
         self.lccoins_balances = np.zeros(num_agents, dtype=np.float64)
         self.minted_keys: set[tuple[str, int, int]] = set()
         self.records: list[SettlementRecord] = []
+        self.validators: list[ValidatorNode] = _default_validator_set(
+            config.lccoins.validator_count
+        )
 
     def settle(
         self,
@@ -156,7 +187,7 @@ class SettlementEngine:
             epoch=package.epoch,
             package_hash=package.package_hash,
             state=SETTLED,
-            reason="TECS-Chain bypassed",
+            reason="区块链结算已绕过",
         )
         self._apply_energy_payments(package, record)
         self._apply_carbon_market(package, record)
@@ -220,10 +251,12 @@ class SettlementEngine:
             if key in self.minted_keys:
                 raise RuntimeError(f"duplicate Lccoins mint for {key}")
             amount = float(package.carbon.lccoins_candidate[agent])
-            votes = self._lccoins_consensus_votes(package, agent, amount)
+            confirmations = self._run_consensus(package, agent, amount)
+            votes = sum(1 for v in confirmations.values() if v)
             confirmed = votes >= threshold
             record.consensus_votes[agent] = votes
             record.consensus_confirmed[agent] = confirmed
+            record.validator_confirmations[agent] = confirmations
             if not confirmed:
                 continue
             self.minted_keys.add(key)
@@ -237,16 +270,24 @@ class SettlementEngine:
             return configured
         return int(math.ceil(2.0 * validators / 3.0))
 
-    def _lccoins_consensus_votes(
+    def _run_consensus(
         self,
         package: ClearingPackage,
         agent: int,
         candidate_amount: float,
-    ) -> int:
-        validators = max(int(self.config.lccoins.validator_count), 1)
-        if not self._lccoins_record_is_valid(package, agent, candidate_amount):
-            return 0
-        return validators
+    ) -> dict[str, bool]:
+        """逐验证节点独立检查，返回每个节点的确认标识 sigma^v。
+
+        每个验证节点独立检查以下条件（论文 2.2 节）：
+        1. P2P 购售电量是否满足清算平衡
+        2. 清洁电量是否存在重复计入
+        3. 碳减排量是否由基准排放因子和实际等效排放因子一致计算
+        4. LCCoins 铸造量是否符合预设铸造规则
+
+        若验证通过，节点生成确认标识 sigma^v = True；否则为 False。
+        """
+        is_valid = self._lccoins_record_is_valid(package, agent, candidate_amount)
+        return {v.node_id: is_valid for v in self.validators}
 
     def _lccoins_record_is_valid(
         self,
@@ -325,19 +366,18 @@ class SettlementEngine:
         return abs(candidate_amount - expected) <= max(tolerance, 1e-5)
 
 
-class SimulatedTECSChain:
-    """In-memory blockchain ledger wrapped around the settlement engine.
+class ConsortiumChainLedger:
+    """联盟链账本，包裹结算智能合约执行器。
 
-    The class simulates transaction submission, single-proposer block production,
-    receipts, block hashes, and state roots while reusing SettlementEngine as the
-    deterministic contract executor.
+    模拟交易提交、单提议者出块、回执生成、区块哈希和状态根，
+    复用 SettlementEngine 作为确定性合约执行器。
     """
 
     def __init__(
         self,
         config: ExperimentConfig,
         num_agents: int,
-        chain_id: str = "tecs-chain-local",
+        chain_id: str = "lc-consortium-chain",
         proposer: str = "validator-0",
     ):
         self.config = config
@@ -513,6 +553,10 @@ class SimulatedTECSChain:
                         "event": "LccoinsMinted",
                         "record_id": record.record_id,
                         "total": float(sum(record.lccoins.values())),
+                        "validator_confirmations": {
+                            str(k): v
+                            for k, v in record.validator_confirmations.items()
+                        },
                     },
                 ]
             )
@@ -548,6 +592,10 @@ class SimulatedTECSChain:
                 "head_hash": self.blocks[-1].block_hash if self.blocks else self.genesis_hash,
                 "height": len(self.blocks) - 1,
                 "mempool_size": len(self.mempool),
+                "validators": [
+                    {"node_id": v.node_id, "role": v.role.value}
+                    for v in self.engine.validators
+                ],
                 "blocks": self.blocks,
                 "records": self.engine.records,
                 "state": {

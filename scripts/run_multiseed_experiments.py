@@ -18,15 +18,7 @@ from _experiment_utils import TrainEvalJob, aggregate_rows, run_jobs, write_csv
 DEFAULT_VARIANTS = [
     "tecsf",
     "no_chain",
-    "no_lccoins",
     "mappo",
-    "constrained_mappo",
-    "safety_only",
-    "myopic_opt",
-    "greedy_feasible",
-    "no_lagrange",
-    "preset_low_carbon",
-    "heuristic",
 ]
 
 
@@ -72,7 +64,7 @@ def _profile_metadata(config_path: str) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run formal multi-seed TECSF baseline and ablation experiments."
+        description="运行多种子正式基线和消融实验."
     )
     parser.add_argument("--config", default="configs/default.yaml")
     parser.add_argument("--output-dir", default="outputs/formal_multiseed")

@@ -6,7 +6,7 @@ from time import perf_counter
 import gymnasium as gym
 import numpy as np
 
-from tecsf.chain import SettlementRecord, SimulatedTECSChain
+from tecsf.chain import ConsortiumChainLedger, SettlementRecord
 from tecsf.config import ExperimentConfig
 from tecsf.data import SyntheticScenario, generate_synthetic_scenario
 from tecsf.market import (
@@ -19,8 +19,14 @@ from tecsf.variants import VariantSpec, get_variant
 
 
 P2P_REF_PRICE_OBS_INDEX = 3
-ASSET_BALANCE_OBS_INDEX = 6
-OBS_DIM = 7
+
+
+def compute_obs_dim(variant: VariantSpec) -> int:
+    """根据变体配置计算观测空间维度."""
+    base_dim = 6  # load, pv, soc, p2p_ref_price, buy_price, sell_price
+    if variant.use_asset_observation:
+        base_dim += 1  # + lccoins_balance
+    return base_dim
 
 
 @dataclass
@@ -34,7 +40,7 @@ class StepResult:
 
 
 class EnergyCarbonEnv:
-    """Multi-agent TECSF environment with Gymnasium-style spaces."""
+    """面向 P2P 低碳能源交易的多智能体环境."""
 
     def __init__(
         self,
@@ -47,7 +53,7 @@ class EnergyCarbonEnv:
         self.scenario = scenario or generate_synthetic_scenario(config, seed=config.scenario.seed)
         self.num_agents = self.scenario.num_agents
         self.action_dim = ACTION_DIM
-        self.observation_dim = OBS_DIM
+        self.observation_dim = compute_obs_dim(self.variant)
         self.global_state_dim = self.num_agents * self.observation_dim + self.num_agents**2 + 2 * self.num_agents + self.scenario.num_nodes + 4
         self.action_space = gym.spaces.Box(
             low=-1.0,
@@ -61,7 +67,7 @@ class EnergyCarbonEnv:
             shape=(self.num_agents, self.observation_dim),
             dtype=np.float32,
         )
-        self.chain = SimulatedTECSChain(config, self.num_agents)
+        self.chain = ConsortiumChainLedger(config, self.num_agents)
         self.t = 0
         self.soc = np.full(self.num_agents, config.storage.init_soc, dtype=np.float32)
         self.last_p2p = np.zeros((self.num_agents, self.num_agents), dtype=np.float32)
@@ -74,7 +80,7 @@ class EnergyCarbonEnv:
     def reset(self, seed: int | None = None):
         if seed is not None:
             self.scenario = generate_synthetic_scenario(self.config, seed=seed)
-        self.chain = SimulatedTECSChain(self.config, self.num_agents)
+        self.chain = ConsortiumChainLedger(self.config, self.num_agents)
         self.t = 0
         self.soc = np.full(self.num_agents, self.config.storage.init_soc, dtype=np.float32)
         self.last_p2p.fill(0.0)
@@ -191,77 +197,7 @@ class EnergyCarbonEnv:
         raw[:, 5] = np.clip(discharge / max(s.max_discharge_power, 1e-8), 0.0, 1.0)
         return raw
 
-    def myopic_opt_action(self) -> np.ndarray:
-        idx = self.scenario.time_index(self.t)
-        load = self.scenario.load[:, idx]
-        pv = self.scenario.pv[:, idx]
-        s = self.config.storage
-        m = self.config.market
-        dt = max(self.config.scenario.delta_t, 1e-8)
-        max_charge_by_soc = np.maximum(0.0, (s.soc_max - self.soc) / (s.charge_efficiency * dt))
-        max_discharge_by_soc = np.maximum(0.0, (self.soc - s.soc_min) * s.discharge_efficiency / dt)
-        max_charge = np.minimum(s.max_charge_power, max_charge_by_soc)
-        max_discharge = np.minimum(s.max_discharge_power, max_discharge_by_soc)
-
-        charge = np.zeros(self.num_agents, dtype=np.float32)
-        discharge = np.zeros(self.num_agents, dtype=np.float32)
-        buy = np.zeros(self.num_agents, dtype=np.float32)
-        sell = np.zeros(self.num_agents, dtype=np.float32)
-        emission_price = (
-            float(self.scenario.carbon_allowance_price[idx])
-            * float(self.scenario.grid_emission_factor[idx])
-        )
-        import_cost = float(self.scenario.grid_buy_price[idx]) + emission_price
-        export_credit = float(self.scenario.grid_sell_price[idx])
-        low_carbon_credit = float(self.scenario.low_carbon_sell_price[idx])
-        levels = np.linspace(0.0, 1.0, 6, dtype=np.float32)
-
-        for agent in range(self.num_agents):
-            local_surplus = max(float(pv[agent]) - float(load[agent]), 0.0)
-            local_deficit = max(float(load[agent]) - float(pv[agent]), 0.0)
-            max_charge_local = min(float(max_charge[agent]), local_surplus)
-            max_discharge_local = min(float(max_discharge[agent]), local_deficit)
-            candidates: list[tuple[float, float]] = [(0.0, 0.0)]
-            candidates.extend((float(level * max_charge_local), 0.0) for level in levels[1:])
-            candidates.extend((0.0, float(level * max_discharge_local)) for level in levels[1:])
-            best_score = float("inf")
-            best_charge = 0.0
-            best_discharge = 0.0
-            for cand_charge, cand_discharge in candidates:
-                residual = float(load[agent] + cand_charge - pv[agent] - cand_discharge)
-                grid_buy = max(residual, 0.0)
-                grid_sell = max(-residual, 0.0)
-                pv_surplus = max(float(pv[agent]) - float(load[agent]) - cand_charge, 0.0)
-                score = (
-                    import_cost * grid_buy
-                    - export_credit * grid_sell
-                    - low_carbon_credit * pv_surplus
-                    + float(s.op_cost) * (cand_charge + cand_discharge)
-                )
-                if score < best_score:
-                    best_score = score
-                    best_charge = cand_charge
-                    best_discharge = cand_discharge
-            charge[agent] = best_charge
-            discharge[agent] = best_discharge
-            residual = float(load[agent] + best_charge - pv[agent] - best_discharge)
-            buy[agent] = max(residual, 0.0)
-            sell[agent] = max(-residual, 0.0)
-
-        raw = np.zeros((self.num_agents, self.action_dim), dtype=np.float32)
-        raw[:, 0] = np.clip(buy / max(m.max_buy_power, 1e-8), 0.0, 1.0)
-        raw[:, 1] = np.clip(sell / max(m.max_sell_power, 1e-8), 0.0, 1.0)
-        raw[:, 2] = 1.0
-        raw[:, 3] = -1.0
-        raw[:, 4] = np.clip(charge / max(s.max_charge_power, 1e-8), 0.0, 1.0)
-        raw[:, 5] = np.clip(discharge / max(s.max_discharge_power, 1e-8), 0.0, 1.0)
-        return raw
-
     def deterministic_action(self) -> np.ndarray:
-        if self.variant.name == "myopic_opt":
-            return self.myopic_opt_action()
-        if self.variant.name == "greedy_feasible":
-            return self.greedy_feasible_action()
         return self.heuristic_action()
 
     def _observation(self) -> np.ndarray:
@@ -283,8 +219,9 @@ class EnergyCarbonEnv:
             p2p_ref_price.reshape(-1, 1),
             buy_price.reshape(-1, 1),
             sell_price.reshape(-1, 1),
-            self._normalized_lccoins_balance().reshape(-1, 1),
         ]
+        if self.variant.use_asset_observation:
+            parts.append(self._normalized_lccoins_balance().reshape(-1, 1))
         return np.concatenate(parts, axis=1).astype(np.float32)
 
     def _p2p_reference_price(self, t: int) -> float:
@@ -358,11 +295,6 @@ class EnergyCarbonEnv:
             agent_reward_coin = (
                 float(self.config.lccoins.stock_utility_weight) * utility_stock
                 + float(self.config.lccoins.increment_utility_weight) * utility_increment
-            )
-        elif self.variant.use_preset_low_carbon_reward:
-            agent_reward_coin = (
-                float(self.config.lccoins.increment_utility_weight)
-                * package.carbon.lccoins_candidate.astype(np.float32)
             )
         else:
             agent_reward_coin = np.zeros(self.num_agents, dtype=np.float32)
@@ -471,6 +403,15 @@ class EnergyCarbonEnv:
                 for agent in range(self.num_agents)
             ],
             "consensus_threshold": int(record.consensus_threshold),
+            "validator_confirmations": [
+                {
+                    k: v
+                    for k, v in record.validator_confirmations.get(
+                        agent, {}
+                    ).items()
+                }
+                for agent in range(self.num_agents)
+            ],
             "p2p_reference_price": float(self._p2p_reference_price(package.epoch)),
             "p2p_matrix": package.p2p_power.astype(float).tolist(),
             "p2p_energy": float(package.p2p_power.sum() * dt),

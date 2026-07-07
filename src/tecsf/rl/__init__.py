@@ -1,4 +1,4 @@
-"""Reinforcement learning components for TECSF."""
+"""强化学习组件."""
 
 from tecsf.rl.mappo import TrainingResult, evaluate_policy, train
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import sys
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -29,6 +31,7 @@ class TrainingResult:
     variant: str
     output_dir: str
     checkpoint_path: str
+    best_checkpoint_path: str
     metrics_path: str
     episode_metrics: list[dict[str, float]]
 
@@ -87,6 +90,57 @@ def _normalize_advantage(values: np.ndarray) -> np.ndarray:
     return ((arr - arr.mean()) / (arr.std() + 1e-8)).astype(np.float32)
 
 
+def _lr_factor(config: ExperimentConfig, episode: int) -> float:
+    decay_episodes = max(int(config.rl.lr_decay_episodes), 0)
+    min_factor = float(config.rl.min_lr_factor)
+    if decay_episodes <= 0:
+        return 1.0
+    progress = min(max(float(episode) / float(decay_episodes), 0.0), 1.0)
+    return max(min_factor, 1.0 - progress * (1.0 - min_factor))
+
+
+def _set_optimizer_lr(optimizer: torch.optim.Optimizer, lr: float) -> None:
+    for group in optimizer.param_groups:
+        group["lr"] = lr
+
+
+def _inactive_update_metrics() -> dict[str, float]:
+    return {
+        "actor_loss": 0.0,
+        "critic_loss": 0.0,
+        "entropy": 0.0,
+        "action_prior_loss": 0.0,
+        "action_prior_coef": 0.0,
+        "approx_kl": 0.0,
+        "policy_update_accepted": 0.0,
+    }
+
+
+def _should_restore_best(
+    config: ExperimentConfig,
+    episode: int,
+    best_episode: int | None,
+    updates_frozen: bool,
+) -> bool:
+    if updates_frozen or not bool(config.rl.restore_best_on_plateau):
+        return False
+    if best_episode is None:
+        return False
+    patience = max(int(config.rl.early_stop_patience), 0)
+    warmup = max(int(config.rl.early_stop_warmup_episodes), 0)
+    if patience <= 0 or episode < warmup:
+        return False
+    return episode - best_episode >= patience
+
+
+def _dual_reward_components(data: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+    reward_eco = np.asarray(data["per_agent_reward_eco"], dtype=np.float32)
+    reward_coin = np.asarray(data["per_agent_reward_coin"], dtype=np.float32)
+    total_reward = np.asarray(data["per_agent_rewards"], dtype=np.float32)
+    penalty_reward = total_reward - reward_eco - reward_coin
+    return reward_eco + penalty_reward, reward_coin
+
+
 def _collect_episode(
     env: EnergyCarbonEnv,
     actor: RecurrentGaussianActor,
@@ -95,6 +149,7 @@ def _collect_episode(
     use_heuristic_policy: bool = False,
 ) -> RolloutBuffer:
     buffer = RolloutBuffer()
+    buffer.set_variant(env.variant)
     obs, global_state, _ = env.reset()
     hidden = actor.initial_hidden(env.num_agents, device)
     done = False
@@ -103,6 +158,7 @@ def _collect_episode(
         state_t = torch.as_tensor(global_state, dtype=torch.float32, device=device).unsqueeze(0)
         with torch.no_grad():
             hidden_before = hidden.clone()
+            action_prior = env.greedy_feasible_action()
             if use_heuristic_policy:
                 action_t = torch.as_tensor(
                     env.deterministic_action(), dtype=torch.float32, device=device
@@ -125,6 +181,7 @@ def _collect_episode(
             done=result.terminated or result.truncated,
             value=value_t.cpu().numpy(),
             info=result.info,
+            action_prior=action_prior,
         )
         obs = result.observation
         global_state = result.global_state
@@ -145,21 +202,23 @@ def _update_policy(
     critic_opt: torch.optim.Optimizer,
     rollout: RolloutBuffer,
     device: torch.device,
+    episode: int,
 ) -> dict[str, float]:
     data = rollout.arrays()
     critic_values = data["values"]
     if critic_values.ndim == 1:
         critic_values = critic_values[:, None]
     if variant_spec.use_dual_advantage:
+        reward_eco, reward_coin = _dual_reward_components(data)
         adv_eco, returns_eco = _compute_gae_per_agent(
-            data["per_agent_reward_eco"],
+            reward_eco,
             data["dones"],
             critic_values[:, 0],
             config.rl.gamma,
             config.rl.gae_lambda,
         )
         adv_coin, returns_coin = _compute_gae_per_agent(
-            data["per_agent_reward_coin"],
+            reward_coin,
             data["dones"],
             critic_values[:, 1],
             config.rl.gamma,
@@ -193,6 +252,9 @@ def _update_policy(
     actions = torch.as_tensor(
         data["actions"].reshape(t_steps * n_agents, action_dim), device=device
     )
+    action_priors = torch.as_tensor(
+        data["action_priors"].reshape(t_steps * n_agents, action_dim), device=device
+    )
     old_log_probs = torch.as_tensor(
         data["log_probs"].reshape(t_steps * n_agents), device=device
     )
@@ -220,6 +282,17 @@ def _update_policy(
     actor_loss_value = 0.0
     critic_loss_value = 0.0
     entropy_value = 0.0
+    action_prior_loss_value = 0.0
+    approx_kl_value = 0.0
+    policy_update_accepted = 1.0
+    action_prior_coef = 0.0
+    if variant_spec.name in {"tecsf", "lc_mappo"}:
+        decay = max(int(config.rl.action_prior_decay_episodes), 0)
+        if decay == 0:
+            action_prior_coef = float(config.rl.action_prior_coef)
+        else:
+            remaining = max(0.0, 1.0 - float(episode) / float(decay))
+            action_prior_coef = float(config.rl.action_prior_coef) * remaining
     for _ in range(config.rl.update_epochs):
         if variant_spec.use_dual_advantage:
             assert adv_eco_t is not None
@@ -266,12 +339,44 @@ def _update_policy(
             1.0 - clip_eps,
         )
         clipped = clipped_ratio * adv_actor
-        actor_loss = -torch.min(unclipped, clipped).mean() - config.rl.entropy_coef * entropy
+        action_prior_loss = torch.mean((dist.mean - action_priors) ** 2)
+        actor_loss = (
+            -torch.min(unclipped, clipped).mean()
+            - config.rl.entropy_coef * entropy
+            + action_prior_coef * action_prior_loss
+        )
 
+        target_kl = float(config.rl.target_kl)
+        actor_state = None
+        actor_opt_state = None
+        if target_kl > 0.0:
+            actor_state = {
+                "actor": copy.deepcopy(actor.state_dict()),
+                "credit_net": copy.deepcopy(credit_net.state_dict()),
+                "advantage_gate": copy.deepcopy(advantage_gate.state_dict()),
+                "clip_gate": copy.deepcopy(clip_gate.state_dict()),
+            }
+            actor_opt_state = copy.deepcopy(actor_opt.state_dict())
         actor_opt.zero_grad()
         actor_loss.backward()
         nn.utils.clip_grad_norm_(actor.parameters(), config.rl.max_grad_norm)
         actor_opt.step()
+        if target_kl > 0.0:
+            with torch.no_grad():
+                checked_dist, _ = actor(obs, hidden)
+                checked_log_probs = checked_dist.log_prob(actions).sum(dim=-1)
+                log_ratio = checked_log_probs - old_log_probs
+                approx_kl = torch.mean((torch.exp(log_ratio) - 1.0) - log_ratio)
+            approx_kl_value = float(approx_kl.detach().cpu().item())
+            if approx_kl_value > target_kl:
+                assert actor_state is not None
+                assert actor_opt_state is not None
+                actor.load_state_dict(actor_state["actor"])
+                credit_net.load_state_dict(actor_state["credit_net"])
+                advantage_gate.load_state_dict(actor_state["advantage_gate"])
+                clip_gate.load_state_dict(actor_state["clip_gate"])
+                actor_opt.load_state_dict(actor_opt_state)
+                policy_update_accepted = 0.0
 
         values = critic(states)
         if variant_spec.use_dual_advantage:
@@ -287,12 +392,66 @@ def _update_policy(
         actor_loss_value = float(actor_loss.detach().cpu().item())
         critic_loss_value = float(critic_loss.detach().cpu().item())
         entropy_value = float(entropy.detach().cpu().item())
+        action_prior_loss_value = float(action_prior_loss.detach().cpu().item())
 
     return {
         "actor_loss": actor_loss_value,
         "critic_loss": critic_loss_value,
         "entropy": entropy_value,
+        "action_prior_loss": action_prior_loss_value,
+        "action_prior_coef": float(action_prior_coef),
+        "approx_kl": approx_kl_value,
+        "policy_update_accepted": policy_update_accepted,
     }
+
+
+def _checkpoint_payload(
+    variant: str,
+    cfg: ExperimentConfig,
+    state_dicts: dict[str, Any],
+    episode_metrics: list[dict[str, float]],
+    best_episode: int | None = None,
+    best_score: float | None = None,
+) -> dict[str, Any]:
+    return {
+        "variant": variant,
+        "config": asdict(cfg),
+        **state_dicts,
+        "episode_metrics": episode_metrics,
+        "best_episode": best_episode,
+        "best_score": best_score,
+    }
+
+
+def _model_state_dicts(
+    actor: RecurrentGaussianActor,
+    critic: CentralizedCritic,
+    credit_net: CreditAssignmentNetwork,
+    advantage_gate: AdvantageGate,
+    clip_gate: ClipGate,
+) -> dict[str, Any]:
+    return {
+        "actor_state_dict": actor.state_dict(),
+        "critic_state_dict": critic.state_dict(),
+        "credit_assignment_state_dict": credit_net.state_dict(),
+        "advantage_gate_state_dict": advantage_gate.state_dict(),
+        "clip_gate_state_dict": clip_gate.state_dict(),
+    }
+
+
+def _load_model_state_dicts(
+    state_dicts: dict[str, Any],
+    actor: RecurrentGaussianActor,
+    critic: CentralizedCritic,
+    credit_net: CreditAssignmentNetwork,
+    advantage_gate: AdvantageGate,
+    clip_gate: ClipGate,
+) -> None:
+    actor.load_state_dict(state_dicts["actor_state_dict"])
+    critic.load_state_dict(state_dicts["critic_state_dict"])
+    credit_net.load_state_dict(state_dicts["credit_assignment_state_dict"])
+    advantage_gate.load_state_dict(state_dicts["advantage_gate_state_dict"])
+    clip_gate.load_state_dict(state_dicts["clip_gate_state_dict"])
 
 
 def train(
@@ -318,6 +477,9 @@ def train(
         hidden_dim=cfg.rl.hidden_dim,
         recurrent_dim=cfg.rl.recurrent_dim,
         use_recurrence=variant_spec.use_recurrence,
+        log_std_init=cfg.rl.log_std_init,
+        log_std_min=cfg.rl.log_std_min,
+        log_std_max=cfg.rl.log_std_max,
     ).to(device_obj)
     critic = CentralizedCritic(env.global_state_dim, cfg.rl.hidden_dim).to(device_obj)
     credit_net = CreditAssignmentNetwork(
@@ -343,7 +505,21 @@ def train(
 
     episode_count = cfg.rl.episodes if episodes is None else episodes
     episode_metrics: list[dict[str, float]] = []
+    best_score = float("-inf")
+    best_episode: int | None = None
+    best_state_dicts: dict[str, Any] | None = None
+    best_window = max(int(cfg.rl.best_checkpoint_window), 1)
+    best_min_delta = max(float(cfg.rl.early_stop_min_delta), 0.0)
+    updates_frozen = False
+    restored_best_episode: int | None = None
+    _progress_log_every = max(episode_count // 100, 1)
+    _progress_t0 = time.time()
     for episode in range(episode_count):
+        lr_factor = _lr_factor(cfg, episode)
+        actor_lr = float(cfg.rl.actor_lr) * lr_factor
+        critic_lr = float(cfg.rl.critic_lr) * lr_factor
+        _set_optimizer_lr(actor_opt, actor_lr)
+        _set_optimizer_lr(critic_opt, critic_lr)
         rollout = _collect_episode(
             env,
             actor,
@@ -351,6 +527,7 @@ def train(
             device_obj,
             use_heuristic_policy=not variant_spec.learning,
         )
+        skip_update = updates_frozen or lr_factor <= 0.0
         update_metrics = (
             _update_policy(
                 cfg,
@@ -364,35 +541,88 @@ def train(
                 critic_opt,
                 rollout,
                 device_obj,
+                episode,
             )
-            if variant_spec.learning
-            else {"actor_loss": 0.0, "critic_loss": 0.0, "entropy": 0.0}
+            if variant_spec.learning and not skip_update
+            else _inactive_update_metrics()
         )
         summary = summarize_episode(rollout.infos, rollout.per_agent_rewards)
         summary.update(update_metrics)
         summary["episode"] = float(episode)
+        summary["actor_lr"] = actor_lr
+        summary["critic_lr"] = critic_lr
+        summary["lr_factor"] = lr_factor
+        summary["updates_frozen"] = float(updates_frozen or lr_factor <= 0.0)
+        summary["early_stop_triggered"] = 0.0
         episode_metrics.append(summary)
+        if (episode + 1) % _progress_log_every == 0 or episode == episode_count - 1:
+            elapsed = time.time() - _progress_t0
+            rate = (episode + 1) / elapsed if elapsed > 0 else 0.0
+            eta = (episode_count - episode - 1) / rate if rate > 0 else 0.0
+            print(
+                f"[{variant}] episode {episode + 1}/{episode_count} "
+                f"reward={summary['mean_reward']:.4f} "
+                f"elapsed={elapsed:.0f}s rate={rate:.1f}ep/s eta={eta:.0f}s",
+                flush=True,
+            )
+        recent = episode_metrics[-best_window:]
+        rolling_score = float(np.mean([m["mean_reward"] for m in recent]))
+        if rolling_score > best_score + best_min_delta:
+            best_score = rolling_score
+            best_episode = episode
+            best_state_dicts = copy.deepcopy(
+                _model_state_dicts(
+                    actor, critic, credit_net, advantage_gate, clip_gate
+                )
+            )
+        if _should_restore_best(cfg, episode, best_episode, updates_frozen):
+            if best_state_dicts is not None:
+                _load_model_state_dicts(
+                    best_state_dicts,
+                    actor,
+                    critic,
+                    credit_net,
+                    advantage_gate,
+                    clip_gate,
+                )
+            updates_frozen = True
+            restored_best_episode = best_episode
+            summary["early_stop_triggered"] = 1.0
 
     checkpoint_path = output / f"{variant}_checkpoint.pt"
-    torch.save(
-        {
-            "variant": variant,
-            "config": asdict(cfg),
-            "actor_state_dict": actor.state_dict(),
-            "critic_state_dict": critic.state_dict(),
-            "credit_assignment_state_dict": credit_net.state_dict(),
-            "advantage_gate_state_dict": advantage_gate.state_dict(),
-            "clip_gate_state_dict": clip_gate.state_dict(),
-            "episode_metrics": episode_metrics,
-        },
-        checkpoint_path,
+    best_checkpoint_path = output / f"{variant}_best_checkpoint.pt"
+    final_state_dicts = _model_state_dicts(
+        actor, critic, credit_net, advantage_gate, clip_gate
     )
+    payload = _checkpoint_payload(
+        variant,
+        cfg,
+        final_state_dicts,
+        episode_metrics,
+        best_episode=best_episode,
+        best_score=best_score if np.isfinite(best_score) else None,
+    )
+    payload["best_checkpoint_path"] = str(best_checkpoint_path)
+    payload["restored_best_episode"] = restored_best_episode
+    best_payload = _checkpoint_payload(
+        variant,
+        cfg,
+        best_state_dicts or final_state_dicts,
+        episode_metrics,
+        best_episode=best_episode,
+        best_score=best_score if np.isfinite(best_score) else None,
+    )
+    best_payload["best_checkpoint_path"] = str(best_checkpoint_path)
+    best_payload["restored_best_episode"] = restored_best_episode
+    torch.save(payload, checkpoint_path)
+    torch.save(best_payload, best_checkpoint_path)
     metrics_path = output / f"{variant}_metrics.json"
     write_json(metrics_path, episode_metrics)
     return TrainingResult(
         variant=variant,
         output_dir=str(output),
         checkpoint_path=str(checkpoint_path),
+        best_checkpoint_path=str(best_checkpoint_path),
         metrics_path=str(metrics_path),
         episode_metrics=episode_metrics,
     )
@@ -423,6 +653,9 @@ def evaluate_policy(
         hidden_dim=cfg.rl.hidden_dim,
         recurrent_dim=cfg.rl.recurrent_dim,
         use_recurrence=variant_spec.use_recurrence,
+        log_std_init=cfg.rl.log_std_init,
+        log_std_min=cfg.rl.log_std_min,
+        log_std_max=cfg.rl.log_std_max,
     ).to(device_obj)
     actor.load_state_dict(checkpoint["actor_state_dict"])
     actor.eval()

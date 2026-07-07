@@ -21,7 +21,7 @@ def _read_json(path: Path) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Plot TECS-Chain settlement stress-test results."
+        description="绘制联盟链结算压力测试结果."
     )
     parser.add_argument("summary", help="summary.json from scripts/run_settlement_stress.py")
     parser.add_argument("--output-dir", default=None)

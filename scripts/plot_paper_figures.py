@@ -28,10 +28,10 @@ from figure_style import (
 )
 
 
-MAIN_VARIANTS = ["tecsf", "constrained_mappo", "safety_only", "myopic_opt", "heuristic"]
-LCCOINS_VARIANTS = ["tecsf", "no_lccoins", "preset_low_carbon"]
-NETWORK_VARIANTS = ["tecsf", "heuristic", "no_lagrange"]
-BENCHMARK_VARIANTS = ["tecsf", "myopic_opt", "heuristic"]
+MAIN_VARIANTS = ["tecsf", "mappo"]
+LCCOINS_VARIANTS = ["tecsf"]
+NETWORK_VARIANTS = ["tecsf", "mappo"]
+BENCHMARK_VARIANTS = ["tecsf", "mappo"]
 
 
 def _read_json(path: Path):
@@ -321,16 +321,16 @@ def plot_fig2_safety_stress(
     rows = _summary_rows(root, "network_stress")
     settlement_rows = _settlement_rows(root)
     tecsf_success, lines, trades = _network_matrix(rows, "tecsf", "eval_settlement_success_rate")
-    no_lagrange_success, _, _ = _network_matrix(rows, "no_lagrange", "eval_settlement_success_rate")
+    baseline_success, _, _ = _network_matrix(rows, "mappo", "eval_settlement_success_rate")
     tecsf_violation, _, _ = _network_matrix(rows, "tecsf", "eval_max_violation")
-    no_lagrange_violation, _, _ = _network_matrix(rows, "no_lagrange", "eval_max_violation")
+    baseline_violation, _, _ = _network_matrix(rows, "mappo", "eval_max_violation")
 
     fig, axes = plt.subplots(2, 2, figsize=(7.2, 6.2), constrained_layout=True)
     im0 = _draw_heatmap(axes[0, 0], tecsf_success, trades, lines, "LC-MAPPO success rate", "viridis", 0, 1)
     fig.colorbar(im0, ax=axes[0, 0], fraction=0.046, pad=0.02)
-    im1 = _draw_heatmap(axes[0, 1], no_lagrange_success, trades, lines, "w/o Lagrange success rate", "viridis", 0, 1)
+    im1 = _draw_heatmap(axes[0, 1], baseline_success, trades, lines, "MAPPO success rate", "viridis", 0, 1)
     fig.colorbar(im1, ax=axes[0, 1], fraction=0.046, pad=0.02)
-    reduction = no_lagrange_violation - tecsf_violation
+    reduction = baseline_violation - tecsf_violation
     im2 = _draw_heatmap(axes[1, 0], reduction, trades, lines, "Violation reduction", "cividis")
     fig.colorbar(im2, ax=axes[1, 0], fraction=0.046, pad=0.02)
     _plot_settlement_matrix(axes[1, 1], settlement_rows)
@@ -448,13 +448,13 @@ def _plot_runtime_ratio(ax, rows: list[dict]) -> None:
     x = np.arange(len(labels))
     tecsf_ratio = []
     for label in labels:
-        base = _mean_ci(rows, "total_seconds", "heuristic", label=label)[0]
+        base = _mean_ci(rows, "total_seconds", "mappo", label=label)[0]
         tecsf = _mean_ci(rows, "total_seconds", "tecsf", label=label)[0]
         tecsf_ratio.append(tecsf / base if base > 0 else 0.0)
     ax.bar(x, tecsf_ratio, color=variant_color("tecsf"), width=0.6)
     ax.axhline(1.0, color="#111111", linestyle="--", linewidth=0.8)
     ax.set_xticks(x, [format_label(label) for label in labels], rotation=25, ha="right")
-    ax.set_ylabel("LC-MAPPO / heuristic time")
+    ax.set_ylabel("LC-MAPPO / MAPPO time")
     ax.set_title("Relative runtime")
     style_axes(ax)
 

@@ -27,7 +27,7 @@ def main() -> None:
     parser.add_argument("--eval-episodes", type=int, default=5)
     parser.add_argument("--eval-seed-start", type=int, default=160000)
     parser.add_argument("--seeds", nargs="+", type=int, default=[7, 42, 100])
-    parser.add_argument("--variants", nargs="+", choices=sorted(VARIANTS), default=["tecsf", "myopic_opt", "heuristic"])
+    parser.add_argument("--variants", nargs="+", choices=sorted(VARIANTS), default=["tecsf", "mappo"])
     parser.add_argument("--agent-counts", nargs="+", type=int, default=[8, 16, 32])
     parser.add_argument("--node-counts", nargs="+", type=int, default=[5, 9, 17])
     parser.add_argument("--device", default="auto", help="auto, cpu, cuda, or cuda:<index>")

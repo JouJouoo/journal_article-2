@@ -104,7 +104,7 @@ def _resolve_standard_case(
         return (
             locked,
             "locked_standard_profile",
-            "Locked TECSF benchmark table; validate against authoritative sources with "
+            "Locked benchmark table; validate against authoritative sources with "
             "scripts/validate_benchmark_sources.py before paper-grade runs.",
         )
 
@@ -205,7 +205,7 @@ def build_standard_profile(
         ),
         "model_parameter_notes": np.asarray(
             "Raw branch ohm values are preserved; resistance/reactance fields are "
-            "scaled equivalents for TECSF's linear radial voltage approximation."
+            "scaled equivalents for the linear radial voltage approximation."
         ),
         "base_kv": np.asarray(case.base_kv, dtype=np.float32),
         "base_mva": np.asarray(case.base_mva, dtype=np.float32),
@@ -261,7 +261,7 @@ def build_synthetic33_profile(
         ),
         "case_name": np.asarray("synthetic33"),
         "case_display_name": np.asarray("IEEE-33-style synthetic profile"),
-        "case_source": np.asarray("TECSF synthetic 33-node radial profile"),
+        "case_source": np.asarray("synthetic 33-node radial profile"),
         "case_source_url": np.asarray(""),
         "case_notes": np.asarray("Synthetic/derived profile; not a standard IEEE 33-bus case."),
         "base_kv": np.asarray(12.66, dtype=np.float32),
@@ -300,7 +300,7 @@ def build_profile(
 def main() -> None:
     cases = ["synthetic33", *sorted(BENCHMARK_CASES)]
     parser = argparse.ArgumentParser(
-        description="Create TECSF scenario profiles from synthetic or standard distribution benchmark cases."
+        description="从合成或标准配电网算例创建场景 profile."
     )
     parser.add_argument("--output", required=True)
     parser.add_argument("--case", choices=cases, default="synthetic33")

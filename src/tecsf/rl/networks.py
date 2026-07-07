@@ -19,10 +19,15 @@ class RecurrentGaussianActor(nn.Module):
         hidden_dim: int,
         recurrent_dim: int,
         use_recurrence: bool = True,
+        log_std_init: float = -3.0,
+        log_std_min: float = -4.0,
+        log_std_max: float = -2.5,
     ):
         super().__init__()
         self.use_recurrence = use_recurrence
         self.recurrent_dim = recurrent_dim
+        self.log_std_min = float(log_std_min)
+        self.log_std_max = float(log_std_max)
         self.encoder = nn.Sequential(
             layer_init(nn.Linear(obs_dim, hidden_dim)),
             nn.Tanh(),
@@ -32,7 +37,7 @@ class RecurrentGaussianActor(nn.Module):
         self.gru = nn.GRUCell(hidden_dim, recurrent_dim)
         actor_in = recurrent_dim if use_recurrence else hidden_dim
         self.mean = layer_init(nn.Linear(actor_in, action_dim), std=0.01)
-        self.log_std = nn.Parameter(torch.full((action_dim,), -0.5))
+        self.log_std = nn.Parameter(torch.full((action_dim,), float(log_std_init)))
 
     def initial_hidden(self, num_agents: int, device: torch.device) -> torch.Tensor:
         return torch.zeros(num_agents, self.recurrent_dim, device=device)
@@ -48,7 +53,8 @@ class RecurrentGaussianActor(nn.Module):
             next_hidden = hidden
             features = encoded
         mean = torch.tanh(self.mean(features))
-        std = torch.exp(self.log_std).expand_as(mean)
+        log_std = torch.clamp(self.log_std, self.log_std_min, self.log_std_max)
+        std = torch.exp(log_std).expand_as(mean)
         return Normal(mean, std), next_hidden
 
 

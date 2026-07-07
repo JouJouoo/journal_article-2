@@ -35,7 +35,7 @@ def main() -> None:
         "--variants",
         nargs="+",
         choices=sorted(VARIANTS),
-        default=["tecsf", "constrained_mappo", "safety_only", "myopic_opt", "greedy_feasible", "no_lagrange", "heuristic"],
+        default=["tecsf", "mappo"],
     )
     parser.add_argument("--load-scales", nargs="+", type=float, default=[1.0, 1.3])
     parser.add_argument("--pv-scales", nargs="+", type=float, default=[0.7, 1.0, 1.3])

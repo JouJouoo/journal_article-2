@@ -22,43 +22,21 @@ METHOD_DISPLAY_NAMES = {
     "tecsf": "LC-MAPPO",
     "lc_mappo": "LC-MAPPO",
     "mappo": "MAPPO",
-    "constrained_mappo": "Constrained MAPPO",
-    "myopic_opt": "Myopic opt.",
-    "greedy_feasible": "Greedy feasible",
-    "heuristic": "Heuristic",
     "no_chain": "w/o chain",
-    "no_lccoins": "w/o LCCoins",
-    "no_lagrange": "w/o Lagrange",
-    "preset_low_carbon": "Preset low-carbon",
-    "safety_only": "Safety only",
 }
 
 METHOD_COLORS = {
     "tecsf": "#0072B2",
     "lc_mappo": "#0072B2",
     "mappo": "#D55E00",
-    "myopic_opt": "#009E73",
-    "heuristic": "#666666",
     "no_chain": "#56B4E9",
-    "no_lccoins": "#CC79A7",
-    "no_lagrange": "#D55E00",
-    "preset_low_carbon": "#009E73",
-    "constrained_mappo": "#9467BD",
-    "safety_only": "#8C564B",
 }
 
 METHOD_ORDER = [
     "tecsf",
     "lc_mappo",
     "mappo",
-    "myopic_opt",
-    "heuristic",
     "no_chain",
-    "no_lccoins",
-    "no_lagrange",
-    "preset_low_carbon",
-    "constrained_mappo",
-    "safety_only",
 ]
 
 STATE_COLORS = {

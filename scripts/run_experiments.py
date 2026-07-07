@@ -22,24 +22,32 @@ from tecsf.rl.mappo import train
 from tecsf.variants import VARIANTS
 
 
+def _moving_average(values: list[float], window: int) -> list[float]:
+    if window <= 1:
+        return values
+    smoothed: list[float] = []
+    for idx in range(len(values)):
+        start = max(0, idx - window + 1)
+        span = values[start : idx + 1]
+        smoothed.append(sum(span) / len(span))
+    return smoothed
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run TECSF baselines and ablations.")
+    parser = argparse.ArgumentParser(description="运行基线方法和消融实验.")
     parser.add_argument("--config", default="configs/default.yaml")
     parser.add_argument("--episodes", type=int, default=5)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--device", default=None, help="auto, cpu, cuda, or cuda:<index>")
     parser.add_argument("--output-dir", default="outputs/experiments")
+    parser.add_argument("--smooth-window", type=int, default=50)
     parser.add_argument(
         "--variants",
         nargs="*",
         default=[
             "tecsf",
             "no_chain",
-            "no_lccoins",
             "mappo",
-            "no_lagrange",
-            "preset_low_carbon",
-            "heuristic",
         ],
         choices=sorted(VARIANTS),
     )
@@ -65,7 +73,15 @@ def main() -> None:
     for variant, metrics in all_metrics.items():
         xs = [m["episode"] for m in metrics]
         ys = [m["mean_reward"] for m in metrics]
-        ax.plot(xs, ys, label=display_variant(variant), color=variant_color(variant), linewidth=1.4)
+        color = variant_color(variant)
+        ax.plot(xs, ys, color=color, linewidth=0.8, alpha=0.28)
+        ax.plot(
+            xs,
+            _moving_average(ys, args.smooth_window),
+            label=f"{display_variant(variant)} ({args.smooth_window}-episode MA)",
+            color=color,
+            linewidth=1.8,
+        )
     ax.set_title("Training reward curves")
     ax.set_xlabel("Episode")
     ax.set_ylabel("Mean reward")

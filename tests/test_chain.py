@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from tecsf.chain import REJECTED, REVERTED, SETTLED, SettlementEngine, SimulatedTECSChain
+from tecsf.chain import REJECTED, REVERTED, SETTLED, ConsortiumChainLedger, SettlementEngine
 from tecsf.config import ExperimentConfig, ScenarioConfig
 from tecsf.data import generate_synthetic_scenario
 from tecsf.market import ActionBatch, clear_market
@@ -99,9 +99,9 @@ def test_lccoins_consensus_rejects_inconsistent_carbon_reduction():
     assert engine.lccoins_balances[agent] == 0.0
 
 
-def test_simulated_chain_produces_blocks_and_receipts(tmp_path):
+def test_chain_produces_blocks_and_receipts(tmp_path):
     config, package = _package()
-    chain = SimulatedTECSChain(config, num_agents=3)
+    chain = ConsortiumChainLedger(config, num_agents=3)
 
     record = chain.settle(package)
 
@@ -121,9 +121,9 @@ def test_simulated_chain_produces_blocks_and_receipts(tmp_path):
     assert ledger_path.exists()
 
 
-def test_simulated_chain_links_consecutive_blocks():
+def test_chain_links_consecutive_blocks():
     config, package = _package()
-    chain = SimulatedTECSChain(config, num_agents=3)
+    chain = ConsortiumChainLedger(config, num_agents=3)
 
     first = chain.settle(package)
     second = chain.settle(package)
@@ -133,3 +133,22 @@ def test_simulated_chain_links_consecutive_blocks():
     assert len(chain.blocks) == 2
     assert chain.blocks[1].prev_hash == chain.blocks[0].block_hash
     assert chain.blocks[1].receipts[0].state == REVERTED
+
+
+def test_validator_confirmations_recorded_per_node():
+    """验证每个验证节点都生成独立的确认标识 sigma^v。"""
+    config, package = _package()
+    config.lccoins.validator_count = 4
+    engine = SettlementEngine(config, num_agents=3)
+    assert len(engine.validators) == 4
+    roles = {v.role.value for v in engine.validators}
+    assert roles == {"market_clearing", "metering", "carbon_accounting", "ledger_maintenance"}
+
+    record = engine.settle(package)
+    assert record.state == SETTLED
+    for agent in range(3):
+        confirmations = record.validator_confirmations.get(agent, {})
+        assert len(confirmations) == 4
+        assert all(isinstance(v, bool) for v in confirmations.values())
+        votes = sum(1 for v in confirmations.values() if v)
+        assert record.consensus_votes[agent] == votes

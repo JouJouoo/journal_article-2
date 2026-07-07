@@ -35,7 +35,7 @@ def main() -> None:
         "--variants",
         nargs="+",
         choices=sorted(VARIANTS),
-        default=["tecsf", "no_lccoins", "preset_low_carbon"],
+        default=["tecsf"],
     )
     parser.add_argument(
         "--asset-utility-weights",

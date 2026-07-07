@@ -21,7 +21,7 @@ def _load_style_module():
 def test_label_parsing_and_display_names():
     style = _load_style_module()
 
-    assert style.display_variant("no_lccoins") == "w/o LCCoins"
+    assert style.display_variant("no_chain") == "w/o chain"
     assert style.display_variant("tecsf") == "LC-MAPPO"
     assert style.display_variant("lc_mappo") == "LC-MAPPO"
     assert style.variant_color("lc_mappo") == style.variant_color("tecsf")

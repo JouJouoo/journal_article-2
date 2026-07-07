@@ -62,7 +62,7 @@ def _check_file(path: Path, failures: list[str]) -> dict[str, Any] | None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Check improved TECSF experiment outputs against acceptance gates."
+        description="检查实验输出是否满足验收门限."
     )
     parser.add_argument("output_dir")
     parser.add_argument("--min-success", type=float, default=0.95)

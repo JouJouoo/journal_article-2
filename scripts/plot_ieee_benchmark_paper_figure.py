@@ -25,7 +25,7 @@ CASES = [
     ("benchmark_ieee33bw", "IEEE 33-bus"),
     ("benchmark_ieee69", "IEEE 69-bus"),
 ]
-VARIANTS = ["tecsf", "myopic_opt", "heuristic"]
+VARIANTS = ["tecsf", "mappo"]
 
 
 def _read_json(path: Path):

@@ -46,12 +46,7 @@ TRAINABLE_VARIANTS = {
     "tecsf",
     "lc_mappo",
     "mappo",
-    "constrained_mappo",
-    "safety_only",
     "no_chain",
-    "no_lccoins",
-    "no_lagrange",
-    "preset_low_carbon",
 }
 
 

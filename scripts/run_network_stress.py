@@ -23,7 +23,7 @@ def _slug(value: float) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run network-constraint stress experiments for TECSF variants."
+        description="运行网络约束压力实验."
     )
     parser.add_argument("--config", default="configs/default.yaml")
     parser.add_argument("--output-dir", default="outputs/network_stress")
@@ -31,7 +31,7 @@ def main() -> None:
     parser.add_argument("--eval-episodes", type=int, default=20)
     parser.add_argument("--eval-seed-start", type=int, default=140000)
     parser.add_argument("--seeds", nargs="+", type=int, default=[7, 42, 100])
-    parser.add_argument("--variants", nargs="+", choices=sorted(VARIANTS), default=["tecsf", "constrained_mappo", "safety_only", "myopic_opt", "greedy_feasible", "no_lagrange", "heuristic"])
+    parser.add_argument("--variants", nargs="+", choices=sorted(VARIANTS), default=["tecsf", "mappo"])
     parser.add_argument("--line-capacity-scales", nargs="+", type=float, default=[1.0, 0.7, 0.5])
     parser.add_argument("--trade-power-scales", nargs="+", type=float, default=[1.0, 1.3])
     parser.add_argument("--device", default="auto", help="auto, cpu, cuda, or cuda:<index>")

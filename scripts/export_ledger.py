@@ -36,7 +36,7 @@ def _load_actor(checkpoint_path: str | Path, env: EnergyCarbonEnv, device: torch
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run a deterministic policy rollout and export simulated TECS-Chain ledgers."
+        description="运行确定性策略 rollout 并导出联盟链账本."
     )
     parser.add_argument("checkpoint", nargs="?", default=None)
     parser.add_argument("--config", default="configs/default.yaml")

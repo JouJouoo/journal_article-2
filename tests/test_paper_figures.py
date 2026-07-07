@@ -43,7 +43,7 @@ def _run_row(label: str, variant: str, seed: int, scale: float = 1.0) -> dict:
 
 def _build_synthetic_report(root: Path) -> None:
     formal = []
-    variants = ["tecsf", "mappo", "no_lccoins", "no_lagrange", "preset_low_carbon", "heuristic"]
+    variants = ["tecsf", "mappo", "no_chain"]
     for idx, variant in enumerate(variants, start=1):
         for seed in [1, 2]:
             formal.append(_run_row("formal_multiseed", variant, seed, scale=1.0 + idx * 0.05 + seed * 0.01))
@@ -51,7 +51,7 @@ def _build_synthetic_report(root: Path) -> None:
 
     lccoins = []
     for asset_weight in ["0", "0p1", "0p2"]:
-        for idx, variant in enumerate(["tecsf", "no_lccoins", "preset_low_carbon"], start=1):
+        for idx, variant in enumerate(["tecsf"], start=1):
             for seed in [1, 2]:
                 label = f"stock_{asset_weight}__inc_{asset_weight}__ce_1__cr_0p5"
                 lccoins.append(_run_row(label, variant, seed, scale=1.0 + idx * 0.03))
@@ -60,7 +60,7 @@ def _build_synthetic_report(root: Path) -> None:
     network = []
     for line in ["0p5", "0p7"]:
         for trade in ["1", "1p3"]:
-            for idx, variant in enumerate(["tecsf", "heuristic", "no_lagrange"], start=1):
+            for idx, variant in enumerate(["tecsf", "mappo"], start=1):
                 for seed in [1, 2]:
                     network.append(_run_row(f"line_{line}__trade_{trade}", variant, seed, scale=1.0 + idx * 0.1))
     _write_summary(root, "network_stress", network)
@@ -68,13 +68,13 @@ def _build_synthetic_report(root: Path) -> None:
     scalability = []
     for agents in [8, 16]:
         for nodes in [5, 9]:
-            for variant, scale in [("heuristic", 1.0), ("tecsf", 1.6)]:
+            for variant, scale in [("mappo", 1.0), ("tecsf", 1.6)]:
                 for seed in [1, 2]:
                     scalability.append(_run_row(f"agents_{agents}__nodes_{nodes}", variant, seed, scale=scale))
     _write_summary(root, "scalability", scalability)
 
     benchmark = []
-    for idx, variant in enumerate(["tecsf", "myopic_opt", "heuristic"], start=1):
+    for idx, variant in enumerate(["tecsf", "mappo"], start=1):
         for seed in [1, 2]:
             benchmark.append(_run_row("formal_multiseed", variant, seed, scale=1.0 + idx * 0.04))
     _write_summary(root, "benchmark_ieee33bw", benchmark)
