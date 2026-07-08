@@ -177,8 +177,14 @@ def run_check():
         log(f"[{name}] status={status}  log_ep={ep_log}  metrics_ep={ep_met}  "
             f"log_rw={rw_log}  metrics_rw={rw_met}")
 
+        # Don't restart if training completed (episode reached total)
         if not active:
-            restart_job(key, cfg)
+            ep = log_progress["episode"] or met_progress.get("episode")
+            total = log_progress["total"]
+            if total and ep and ep >= total:
+                log(f"[{name}] COMPLETED — skipped restart")
+            else:
+                restart_job(key, cfg)
 
     log("MONITOR CHECK END\n")
 

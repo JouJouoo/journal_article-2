@@ -116,6 +116,7 @@ class RLConfig:
     min_lr_factor: float = 0.0
     target_kl: float = 0.02
     best_checkpoint_window: int = 500
+    periodic_checkpoint_interval: int = 500
     early_stop_warmup_episodes: int = 4000
     early_stop_patience: int = 1000
     early_stop_min_delta: float = 5e-4

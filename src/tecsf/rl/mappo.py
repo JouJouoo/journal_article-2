@@ -565,6 +565,39 @@ def train(
                 f"elapsed={elapsed:.0f}s rate={rate:.1f}ep/s eta={eta:.0f}s",
                 flush=True,
             )
+        # Periodic checkpointing — persist metrics + model every N episodes so
+        # data survives even if the process is killed before normal completion.
+        _ckpt_interval = max(int(cfg.rl.periodic_checkpoint_interval), 1)
+        if (episode + 1) % _ckpt_interval == 0:
+            _save_checkpoint = output / f"{variant}_checkpoint.pt"
+            _save_best = output / f"{variant}_best_checkpoint.pt"
+            _save_metrics = output / f"{variant}_metrics.json"
+            _state = _model_state_dicts(
+                actor, critic, credit_net, advantage_gate, clip_gate
+            )
+            torch.save(
+                _checkpoint_payload(
+                    variant, cfg, _state, episode_metrics,
+                    best_episode=best_episode,
+                    best_score=best_score if np.isfinite(best_score) else None,
+                ),
+                _save_checkpoint,
+            )
+            if best_state_dicts is not None:
+                torch.save(
+                    _checkpoint_payload(
+                        variant, cfg, best_state_dicts, episode_metrics,
+                        best_episode=best_episode,
+                        best_score=best_score if np.isfinite(best_score) else None,
+                    ),
+                    _save_best,
+                )
+            write_json(_save_metrics, episode_metrics)
+            print(
+                f"[{variant}] checkpoint saved at episode {episode + 1} "
+                f"({len(episode_metrics)} records)",
+                flush=True,
+            )
         recent = episode_metrics[-best_window:]
         rolling_score = float(np.mean([m["mean_reward"] for m in recent]))
         if rolling_score > best_score + best_min_delta:

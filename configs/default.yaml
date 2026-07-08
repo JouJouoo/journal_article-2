@@ -94,6 +94,7 @@ rl:
   min_lr_factor: 0.0
   target_kl: 0.02
   best_checkpoint_window: 500
+  periodic_checkpoint_interval: 500
   early_stop_warmup_episodes: 4000
   early_stop_patience: 1000
   early_stop_min_delta: 0.0005
