@@ -11,7 +11,14 @@
 
 ## 快速开始
 
-使用本机已有的 conda Python 环境：
+### Linux / macOS
+
+```bash
+python3 -m pytest
+python3 scripts/train.py --episodes 3 --output-dir outputs/smoke
+```
+
+### Windows (PowerShell)
 
 ```powershell
 & "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" -m pytest
@@ -20,61 +27,61 @@
 
 运行默认实验变体：
 
-```powershell
-& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\run_experiments.py --episodes 5 --output-dir outputs\experiments
+```bash
+python3 scripts/run_experiments.py --episodes 5 --output-dir outputs/experiments
 ```
 
 运行多种子正式基线/消融实验（自动 CUDA 回退）：
 
-```powershell
-& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\run_multiseed_experiments.py --episodes 1000 --eval-episodes 20 --device auto --jobs 1 --output-dir outputs\formal_multiseed
+```bash
+python3 scripts/run_multiseed_experiments.py --episodes 1000 --eval-episodes 20 --device auto --jobs 1 --output-dir outputs/formal_multiseed
 ```
 
 多 GPU 环境可增加 `--jobs`，工作进程以轮转方式分配到 `cuda:<index>`。单 GPU 建议保持 `--jobs 1`。
 
 ## 实验套件
 
-```powershell
-& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\run_lccoins_sensitivity.py --device auto --output-dir outputs\lccoins_sensitivity
-& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\run_network_stress.py --device auto --output-dir outputs\network_stress
-& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\run_system_stress.py --device auto --output-dir outputs\system_stress
-& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\run_scalability_experiment.py --device auto --output-dir outputs\scalability
-& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\run_settlement_stress.py --output-dir outputs\settlement_stress
+```bash
+python3 scripts/run_lccoins_sensitivity.py --device auto --output-dir outputs/lccoins_sensitivity
+python3 scripts/run_network_stress.py --device auto --output-dir outputs/network_stress
+python3 scripts/run_system_stress.py --device auto --output-dir outputs/system_stress
+python3 scripts/run_scalability_experiment.py --device auto --output-dir outputs/scalability
+python3 scripts/run_settlement_stress.py --output-dir outputs/settlement_stress
 ```
 
 从 `summary.json` 生成图表：
 
-```powershell
-& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\plot_experiment_results.py outputs\formal_multiseed\summary.json
-& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\plot_settlement_stress.py outputs\settlement_stress\summary.json
+```bash
+python3 scripts/plot_experiment_results.py outputs/formal_multiseed/summary.json
+python3 scripts/plot_settlement_stress.py outputs/settlement_stress/summary.json
 ```
 
 从已有报告目录生成论文级图表（不重新训练，仅从现有数据重绘）：
 
-```powershell
-& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\plot_paper_figures.py outputs\report_experiments_20260601_fixed --output-dir outputs\report_experiments_20260601_fixed\paper_figures
+```bash
+python3 scripts/plot_paper_figures.py outputs/report_experiments_20260601_fixed --output-dir outputs/report_experiments_20260601_fixed/paper_figures
 ```
 
 配对统计分析：
 
-```powershell
-& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\analyze_experiment_statistics.py outputs\formal_multiseed\summary.json --baseline tecsf
-& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\analyze_pareto_front.py outputs\formal_multiseed\summary.json
+```bash
+python3 scripts/analyze_experiment_statistics.py outputs/formal_multiseed/summary.json --baseline tecsf
+python3 scripts/analyze_pareto_front.py outputs/formal_multiseed/summary.json
 ```
 
 改进版全量实验编排器（`--quick` 为代码级端到端冒烟验证）：
 
-```powershell
-& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\run_improved_experiment_suite.py --quick --benchmark-cases ieee33bw ieee69 --device cpu --jobs 1 --output-dir outputs\improved_suite_quick
-& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\run_improved_experiment_suite.py --benchmark-cases ieee33bw ieee69 --device cpu --jobs 3 --output-dir outputs\improved_suite_1000
+```bash
+python3 scripts/run_improved_experiment_suite.py --quick --benchmark-cases ieee33bw ieee69 --device cpu --jobs 1 --output-dir outputs/improved_suite_quick
+python3 scripts/run_improved_experiment_suite.py --benchmark-cases ieee33bw ieee69 --device cpu --jobs 3 --output-dir outputs/improved_suite_1000
 ```
 
 ## 联盟链账本导出
 
 从训练好的检查点导出联盟链账本：
 
-```powershell
-& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\export_ledger.py outputs\<run>\tecsf_checkpoint.pt --episodes 1 --output-dir outputs\ledger_export
+```bash
+python3 scripts/export_ledger.py outputs/<run>/tecsf_checkpoint.pt --episodes 1 --output-dir outputs/ledger_export
 ```
 
 导出的账本包含区块、结算交易、执行回执、状态根、事件日志、最终余额、LCCoins 铸造记录和验证节点确认信息。
@@ -83,9 +90,9 @@
 
 `ieee33bw` 和 `ieee69` 采用混合来源工作流：pandapower/MATPOWER 作为权威标准算例来源，训练和评估使用冻结的 `.npz` profile 以保证可复现性。`synthetic33` 为派生的 IEEE-33 风格合成 profile，不能报告为标准算例。
 
-```powershell
-& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\create_benchmark_profile.py --case ieee33bw --output outputs\profiles\ieee33bw_weekday.npz --day-type weekday
-& "C:\Users\zrway\.conda\envs\DP-LCRL\python.exe" scripts\validate_benchmark_sources.py --case69-m data\case69.m --strict
+```bash
+python3 scripts/create_benchmark_profile.py --case ieee33bw --output outputs/profiles/ieee33bw_weekday.npz --day-type weekday
+python3 scripts/validate_benchmark_sources.py --case69-m data/case69.m --strict
 ```
 
 ## 实验变体

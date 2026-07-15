@@ -1,0 +1,113 @@
+# IEEE 33-bus LC-MAPPO (最终: LCCoins CRRA + P2P bonus + prior decay)
+# stock_utility_weight 0.1→2.0, increment_utility_weight 0.2→5.0
+# p2p_volume_bonus=0.5, action_prior 0→1500ep 线性衰减
+
+scenario:
+  num_agents: 8
+  num_nodes: 5
+  horizon: 24
+  delta_t: 1.0
+  seed: 7
+  profile_path: "outputs/ieee33bw_profile.npz"
+  load_scale: 1.0
+  pv_scale: 1.0
+  load_noise_scale: 0.0
+  pv_noise_scale: 0.0
+
+network:
+  voltage_ref: 1.0
+  voltage_min: 0.95
+  voltage_max: 1.05
+  default_resistance: 0.003
+  default_reactance: 0.0
+  default_line_capacity: 10.0
+
+market:
+  p2p_price_min: 0.2
+  p2p_price_max: 1.2
+  max_buy_power: 3.0
+  max_sell_power: 3.0
+  grid_buy_base: 0.82
+  grid_sell_base: 0.35
+  carbon_allowance_price: 0.06
+  low_carbon_sell_price: 0.03
+  grid_emission_base: 0.58
+  pv_credit_beta: 1.0
+  p2p_volume_bonus: 0.5
+
+storage:
+  capacity: 5.0
+  soc_min: 0.5
+  soc_max: 4.5
+  init_soc: 2.5
+  charge_efficiency: 0.95
+  discharge_efficiency: 0.95
+  max_charge_power: 1.5
+  max_discharge_power: 1.5
+  op_cost: 0.01
+
+lccoins:
+  clean_energy_weight: 1.0
+  carbon_reduction_weight: 1.0
+  minting_coefficient: 1.0
+  crra_rho: 0.5
+  crra_b0: 1.0
+  stock_utility_weight: 2.0
+  increment_utility_weight: 5.0
+  balance_norm: 10.0
+  validator_count: 4
+  consensus_threshold: 0
+
+clearing:
+  enable_dynamic_action_bounds: true
+  local_trade_margin: 1.2
+  local_storage_margin: 1.0
+  action_saturation_penalty: 0.02
+  max_repair_iters: 20
+  repair_shrink: 0.9
+  network_tolerance: 0.0001
+  violation_penalty: 20.0
+  enable_safety_shield: true
+  safety_storage_fraction: 1.0
+  enable_emergency_balancing: true
+  max_emergency_iters: 20
+  emergency_balance_shrink: 0.7
+  load_shed_penalty: 5.0
+  pv_curtail_penalty: 0.5
+  lagrange_step_size: 0.05
+  preserve_lagrange_on_reset: false
+  adaptive_violation_penalty_gain: 0.5
+  violation_penalty_max_multiplier: 5.0
+
+rl:
+  hidden_dim: 64
+  recurrent_dim: 64
+  actor_lr: 0.00005
+  critic_lr: 0.001
+  gamma: 0.98
+  gae_lambda: 0.95
+  clip_eps: 0.2
+  clip_eps_min: 0.1
+  clip_eps_max: 0.3
+  entropy_coef: 0.0
+  log_std_init: -3.0
+  log_std_min: -4.0
+  log_std_max: -2.5
+  action_prior_coef: 2.0
+  action_prior_decay_episodes: 1500
+  lr_decay_episodes: 5000
+  min_lr_factor: 0.0
+  target_kl: 0.02
+  best_checkpoint_window: 500
+  periodic_checkpoint_interval: 500
+  early_stop_warmup_episodes: 4000
+  early_stop_patience: 1000
+  early_stop_min_delta: 0.0005
+  restore_best_on_plateau: true
+  value_coef: 0.5
+  max_grad_norm: 0.5
+  update_epochs: 1
+  batch_size: 128
+  episodes: 2000
+  seed: 7
+  device: cpu

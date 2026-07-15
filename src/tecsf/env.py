@@ -329,7 +329,10 @@ class EnergyCarbonEnv:
             - carbon_cost
             - emergency_cost
         )
-        agent_profit = agent_reward_eco + agent_reward_coin
+        p2p_energy_bought = package.p2p_power.sum(axis=0) * dt
+        p2p_energy_sold = package.p2p_power.sum(axis=1) * dt
+        p2p_volume_bonus = self.config.market.p2p_volume_bonus * (p2p_energy_bought + p2p_energy_sold)
+        agent_profit = agent_reward_eco + agent_reward_coin + p2p_volume_bonus
         rewards = agent_profit.copy()
         rewards = rewards - penalty / max(self.num_agents, 1)
         if not record.settled:

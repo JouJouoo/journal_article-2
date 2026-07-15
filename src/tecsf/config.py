@@ -43,6 +43,7 @@ class MarketConfig:
     low_carbon_sell_price: float = 0.03
     grid_emission_base: float = 0.58
     pv_credit_beta: float = 1.0
+    p2p_volume_bonus: float = 0.0
 
 
 @dataclass
@@ -145,12 +146,14 @@ def _merge_dataclass(cls: type, data: dict[str, Any] | None):
     base = cls()
     if not data:
         return base
+    if not isinstance(data, dict):
+        return data
     type_hints = get_type_hints(cls)
     values = {}
     for f in fields(base):
         raw = data.get(f.name, getattr(base, f.name))
         field_type = type_hints.get(f.name, f.type)
-        if is_dataclass(field_type):
+        if is_dataclass(field_type) and isinstance(raw, dict):
             values[f.name] = _merge_dataclass(field_type, raw)
         else:
             values[f.name] = raw

@@ -1,6 +1,7 @@
 __pycache__/
 .pytest_cache/
 .vscode/
+.qwen/
 .codex_resources_*.json
 .claude_resources.json
 *.pyc
