@@ -420,6 +420,8 @@ class EnergyCarbonEnv:
             "p2p_energy": float(package.p2p_power.sum() * dt),
             "attempted_p2p_energy": float(package.attempted_p2p_power.sum() * dt),
             "grid_buy_cost": float(grid_cost.sum()),
+            "grid_sell_energy": float(package.grid_sell.sum() * dt),
+            "grid_sell_revenue": float(grid_revenue.sum()),
             "pv_generation": pv_generation,
             "pv_used": pv_used,
             "trade_repair_deviation": trade_repair_deviation,

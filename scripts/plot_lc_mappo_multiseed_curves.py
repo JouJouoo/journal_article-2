@@ -60,6 +60,8 @@ SUMMARY_METRICS = [
     "total_reward",
     "p2p_energy",
     "system_cost",
+    "grid_sell_energy",
+    "grid_sell_revenue",
     "grid_carbon_emission",
     "carbon_reduction",
     "lccoins",

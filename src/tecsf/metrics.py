@@ -66,6 +66,8 @@ def summarize_episode(infos: list[dict], rewards: list[np.ndarray]) -> dict[str,
     total_p2p = 0.0
     total_attempted_p2p = 0.0
     total_grid_buy_cost = 0.0
+    total_grid_sell_energy = 0.0
+    total_grid_sell_revenue = 0.0
     total_social_cost = 0.0
     total_participant_payment_cost = 0.0
     total_p2p_transfer_payment = 0.0
@@ -123,6 +125,8 @@ def summarize_episode(infos: list[dict], rewards: list[np.ndarray]) -> dict[str,
         total_p2p += float(info.get("p2p_energy", 0.0))
         total_attempted_p2p += float(info.get("attempted_p2p_energy", 0.0))
         total_grid_buy_cost += float(info.get("grid_buy_cost", 0.0))
+        total_grid_sell_energy += float(info.get("grid_sell_energy", 0.0))
+        total_grid_sell_revenue += float(info.get("grid_sell_revenue", 0.0))
         total_emergency_cost += float(info.get("emergency_cost", 0.0))
         total_load_shed += float(info.get("load_shed", 0.0))
         total_pv_curtailment += float(info.get("pv_curtailment", 0.0))
@@ -266,6 +270,8 @@ def summarize_episode(infos: list[dict], rewards: list[np.ndarray]) -> dict[str,
         "p2p_energy": total_p2p,
         "attempted_p2p_energy": total_attempted_p2p,
         "grid_buy_cost": total_grid_buy_cost,
+        "grid_sell_energy": total_grid_sell_energy,
+        "grid_sell_revenue": total_grid_sell_revenue,
         "emergency_cost": total_emergency_cost,
         "load_shed": total_load_shed,
         "pv_curtailment": total_pv_curtailment,

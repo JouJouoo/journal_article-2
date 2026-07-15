@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing as mp
 import sys
 import time
 from pathlib import Path
@@ -41,9 +42,8 @@ CONFIG_PATH = "configs/default.yaml"
 VARIANT = "lc_mappo"
 EPISODES = 10000
 DEVICE = "cpu"
-NEW_SEEDS = [42, 100]
-EXISTING_SEED = 7
-OUTPUT_BASE = "outputs/lc_mappo_10000ep_multiseed_20260705"
+SEEDS = [42, 100, 200]
+OUTPUT_BASE = "outputs/lc_mappo_10000ep_synthetic_20260715"
 SMOOTH_WINDOW = 100
 TAIL_EPISODES = 1000  # 最后 N 个 episode 用于统计
 
@@ -65,6 +65,8 @@ SUMMARY_METRICS = [
     "total_reward",
     "p2p_energy",
     "system_cost",
+    "grid_sell_energy",
+    "grid_sell_revenue",
     "grid_carbon_emission",
     "carbon_reduction",
     "lccoins",
@@ -346,19 +348,20 @@ def generate_summary_table(
     return summary
 
 
+def _train_worker(args: tuple) -> Path | None:
+    """Worker function for parallel training (must be at module level for pickle)."""
+    seed, output_base, device, episodes = args
+    return run_single_seed(seed, output_base, device, episodes)
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="LC-MAPPO 三种子 10000ep 批量实验"
+        description="LC-MAPPO 三种子 10000ep 并行批量实验 (仿真数据)"
     )
     parser.add_argument(
         "--skip-train",
         action="store_true",
         help="跳过训练，仅用现有数据生成图表",
-    )
-    parser.add_argument(
-        "--seed7-dir",
-        default="outputs/lc_mappo_10000episodes_plateau_debug_20260704/lc_mappo",
-        help="种子 7 的现有结果目录",
     )
     parser.add_argument(
         "--output-dir",
@@ -369,8 +372,8 @@ def main():
         "--seeds",
         nargs="+",
         type=int,
-        default=NEW_SEEDS,
-        help="需要运行的种子列表",
+        default=SEEDS,
+        help="训练的种子列表",
     )
     parser.add_argument(
         "--device",
@@ -383,29 +386,38 @@ def main():
         default=EPISODES,
         help="训练 episodes 数",
     )
+    parser.add_argument(
+        "--parallel",
+        type=int,
+        default=3,
+        help="并行进程数 (默认: 3)",
+    )
     args = parser.parse_args()
 
     device_val = args.device
     episodes_val = args.episodes
-    new_seeds_val = args.seeds
+    seeds_val = args.seeds
+    parallel_workers = min(args.parallel, len(seeds_val))
 
     output_base = Path(args.output_dir)
     output_base.mkdir(parents=True, exist_ok=True)
 
-    # ---- 阶段 1: 训练 ----
+    # ---- 阶段 1: 并行训练 ----
     if not args.skip_train:
         print(f"\n{'#'*60}")
-        print(f"# 阶段 1: 多种子训练")
-        print(f"# 已有种子: {EXISTING_SEED}")
-        print(f"# 新增种子: {new_seeds_val}")
+        print(f"# 阶段 1: 多种子并行训练")
+        print(f"# 种子: {seeds_val}")
         print(f"# Variant: {VARIANT}, Episodes: {episodes_val}, Device: {device_val}")
+        print(f"# 并行进程数: {parallel_workers}")
         print(f"{'#'*60}")
 
         t_start = time.perf_counter()
-        for seed in new_seeds_val:
-            run_single_seed(seed, output_base, device_val, episodes_val)
+        worker_args = [(s, output_base, device_val, episodes_val) for s in seeds_val]
+        with mp.Pool(parallel_workers) as pool:
+            results = pool.map(_train_worker, worker_args)
         total_elapsed = time.perf_counter() - t_start
-        print(f"\n所有训练完成，总耗时 {total_elapsed:.0f}s ({total_elapsed/3600:.1f}h)")
+        success = sum(1 for r in results if r is not None)
+        print(f"\n训练完成: {success}/{len(seeds_val)} 个种子成功，总耗时 {total_elapsed:.0f}s ({total_elapsed/3600:.1f}h)")
     else:
         print("跳过训练阶段 (--skip-train)")
 
@@ -416,17 +428,7 @@ def main():
 
     all_metrics: dict[int, list[dict]] = {}
 
-    # 种子 7：从已有目录加载
-    seed7_dir = Path(args.seed7_dir)
-    seed7_metrics = seed7_dir / f"{VARIANT}_metrics.json"
-    if seed7_metrics.exists():
-        all_metrics[7] = load_metrics(seed7_metrics)
-        print(f"加载种子 7: {seed7_metrics} ({len(all_metrics[7])} episodes)")
-    else:
-        print(f"警告: 种子 7 指标文件不存在: {seed7_metrics}")
-
-    # 新种子
-    for seed in new_seeds_val:
+    for seed in seeds_val:
         metrics_path = ensure_output_dir(output_base, seed) / f"{VARIANT}_metrics.json"
         if metrics_path.exists():
             all_metrics[seed] = load_metrics(metrics_path)
